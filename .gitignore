@@ -1,0 +1,16 @@
+# 내부 문서 (로컬 전용 — 정찰 상세/민감정보 포함, 공개 금지)
+WORKFLOW.md
+PLAN.md
+
+# Node / Vite / Cloudflare Workers
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
