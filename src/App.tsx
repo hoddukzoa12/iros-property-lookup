@@ -31,7 +31,7 @@ function groupByType(records: PropertyRecord[]) {
 }
 
 export default function App() {
-  const [input, setInput] = useState('서울특별시 송파구 석촌동 265-5\n서울특별시 서초구 반포동 20-1');
+  const [input, setInput] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [running, setRunning] = useState(false);
   const [downloading, setDownloading] = useState(false);
