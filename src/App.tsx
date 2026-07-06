@@ -11,8 +11,13 @@ type Row = {
   error?: string;
 };
 
-const CONCURRENCY = 4;                    // 주소 동시 처리 수
+// IROS 검색 백엔드는 동시 요청 시 불안정하게 0을 반환한다(false "결과 없음" 유발).
+// → 직렬 처리 + 주소 간 페이싱으로 신뢰성 확보 (실측: 직렬은 100% 정확, 동시성은 누락 발생).
+const CONCURRENCY = 1;
+const PACE_MS = 800;                      // 주소 간 간격
 const TYPE_ORDER = ['건물', '토지', '집합건물'];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function groupByType(records: PropertyRecord[]) {
   const g: Record<string, PropertyRecord[]> = {};
@@ -64,6 +69,7 @@ export default function App() {
         } catch (e: any) {
           update(i, { status: 'error', error: e?.message ?? '오류' });
         }
+        if (next < addresses.length) await sleep(PACE_MS); // 주소 간 페이싱
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, addresses.length) }, worker));
