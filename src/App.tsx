@@ -38,6 +38,15 @@ const FILTER_OPTIONS: { value: ResultFilter; label: string }[] = [
   { value: 'review', label: '검토' },
 ];
 
+// 유형 필터 (부동산구분)
+type TypeFilter = 'all' | '집합건물' | '건물' | '토지';
+const TYPE_FILTER_OPTIONS: { value: TypeFilter; label: string }[] = [
+  { value: 'all', label: '전체' },
+  { value: '집합건물', label: '집합건물' },
+  { value: '건물', label: '건물' },
+  { value: '토지', label: '토지' },
+];
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type ParsedLot = {
@@ -236,6 +245,7 @@ export default function App() {
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [resultFilter, setResultFilter] = useState<ResultFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [running, setRunning] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [landInfo, setLandInfo] = useState<Record<string, LandInfo>>({}); // pin → 공시지가·토지등급
@@ -381,7 +391,7 @@ export default function App() {
 
   const nBatch = batchCount(exportRecords.length);
   const query = searchTerm.trim();
-  const filtersActive = Boolean(query) || resultFilter !== 'all';
+  const filtersActive = Boolean(query) || resultFilter !== 'all' || typeFilter !== 'all';
   const visibleRows = rows
     .map((r, i) => {
       const selected = new Set(r.selectedPins);
@@ -389,14 +399,16 @@ export default function App() {
       const classifiedRecords = r.records.map((rec) => ({ rec, kind: classifyRecord(r.address, rec) }));
       const visibleClassifiedRecords = classifiedRecords.filter(({ rec, kind }) =>
         matchesResultFilter(kind, selected.has(rec.pin), resultFilter) &&
+        (typeFilter === 'all' || rec.type === typeFilter) &&
         matchesSearch(recordSearchText(r.address, rec, kind), query),
       );
       const matchCounts = countMatches(classifiedRecords.map((x) => x.kind));
+      const noFilterActive = resultFilter === 'all' && typeFilter === 'all';
       const rowMatches = r.status === 'done'
         ? (r.records.length === 0
-          ? resultFilter === 'all' && matchesSearch(`${r.address} 결과 없음`, query)
+          ? noFilterActive && matchesSearch(`${r.address} 결과 없음`, query)
           : visibleClassifiedRecords.length > 0)
-        : resultFilter === 'all' && matchesSearch(`${r.address} ${r.error ?? ''} ${r.status}`, query);
+        : noFilterActive && matchesSearch(`${r.address} ${r.error ?? ''} ${r.status}`, query);
       const expanded = filtersActive || (expandedRows[i] ?? false);
 
       return {
@@ -416,6 +428,7 @@ export default function App() {
   function clearFilters() {
     setSearchTerm('');
     setResultFilter('all');
+    setTypeFilter('all');
   }
 
   return (
@@ -460,6 +473,18 @@ export default function App() {
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="주소, 도로명, 고유번호, 동/호"
           />
+          <div className="filter-segments" role="group" aria-label="유형 필터">
+            {TYPE_FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={typeFilter === option.value ? 'active' : undefined}
+                onClick={() => setTypeFilter(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <div className="filter-segments" role="group" aria-label="결과 필터">
             {FILTER_OPTIONS.map((option) => (
               <button
