@@ -411,7 +411,7 @@ export default function App() {
   }
 
   async function printEumRecords(records: PropertyRecord[], busyKey: string) {
-    if (!records.length || eumPrintingKey) return;
+    if (!records.length || eumPrintingKey || running) return;
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -448,8 +448,8 @@ export default function App() {
         type="button"
         className="row-action"
         onClick={() => onEumPrintOne(rec)}
-        disabled={Boolean(eumPrintingKey) || landLoading}
-        title="이 필지의 토지이용계획을 PDF로 저장합니다."
+        disabled={running || Boolean(eumPrintingKey) || landLoading}
+        title={running ? '전체 조회가 끝난 뒤 PDF 저장을 사용할 수 있습니다.' : '이 필지의 토지이용계획을 PDF로 저장합니다.'}
       >
         {eumPrintingKey === rec.pin ? '생성 중…' : 'PDF 저장'}
       </button>
@@ -560,14 +560,18 @@ export default function App() {
           <button
             className="dl eum"
             onClick={onEumPrint}
-            disabled={!selectedLandRecords.length || selectedLandRecords.length > 50 || Boolean(eumPrintingKey) || landLoading}
+            disabled={!selectedLandRecords.length || selectedLandRecords.length > 50 || running || Boolean(eumPrintingKey) || landLoading}
             title={
               selectedLandRecords.length > 50
                 ? '한 번에 최대 50필지까지 인쇄할 수 있습니다.'
+                : running
+                  ? '전체 조회가 끝난 뒤 토지이용계획 인쇄를 사용할 수 있습니다.'
                 : '체크된 토지의 토지이용계획 부분인쇄 문서를 하나로 합칩니다.'
             }
           >
-            {landLoading
+            {running
+              ? '조회 완료 후 인쇄'
+              : landLoading
               ? '토지정보 조회 중…'
               : eumPrintingKey === 'bulk'
                 ? '생성 중…'
