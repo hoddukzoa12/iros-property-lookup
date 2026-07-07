@@ -550,7 +550,17 @@ export default function App() {
     <main className="wrap">
       <header className="top">
         <div>
-          <h1>부동산고유번호 조회</h1>
+          <div className="title-row">
+            <h1>부동산고유번호 조회</h1>
+            <a
+              className="guide-link"
+              href="https://merciful-situation-70f.notion.site/4-39632a11691780318f21f3303af62f52"
+              target="_blank"
+              rel="noreferrer"
+            >
+              4종세트 일괄다운로드 방법
+            </a>
+          </div>
           <p className="sub">주소를 줄바꿈으로 여러 건 입력하세요. 시·도 없이 주소만 넣어도 됩니다.</p>
         </div>
         <div className="top-actions">
