@@ -59,3 +59,15 @@ export interface LandInfoResponse {
   results: LandInfo[];
   error?: string;
 }
+
+// ── 토지이용계획 인쇄 HTML (EUM) ──────────────────────────────
+export interface EumPrintItem {
+  key: string;
+  address: string;
+  label?: string;
+  jigaText?: string;
+}
+
+export interface EumPrintRequest {
+  items: EumPrintItem[];
+}

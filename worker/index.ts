@@ -3,7 +3,8 @@ import { collectAddress } from './iros/collect';
 import { refreshLdong, KV_META, type LdongMeta } from './ldong/refresh';
 import { addressesToPnu } from './ldong/lookup';
 import { fetchLandInfos } from './landinfo';
-import type { CollectRequest } from '../shared/types';
+import { buildEumPrintHtml } from './eum/print';
+import type { CollectRequest, EumPrintItem, EumPrintRequest } from '../shared/types';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -24,6 +25,24 @@ const json = (data: unknown, status = 200) =>
     status,
     headers: { 'Content-Type': 'application/json; charset=UTF-8', ...CORS },
   });
+
+const html = (content: string, status = 200) =>
+  new Response(content, {
+    status,
+    headers: { 'Content-Type': 'text/html; charset=UTF-8', ...CORS },
+  });
+
+function normalizeEumItems(value: unknown): EumPrintItem[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((item: any) => ({
+      key: String(item?.key ?? '').trim(),
+      address: String(item?.address ?? '').trim(),
+      label: item?.label == null ? undefined : String(item.label).trim(),
+      jigaText: item?.jigaText == null ? undefined : String(item.jigaText).trim(),
+    }))
+    .filter((item) => item.key && item.address);
+}
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -89,6 +108,28 @@ export default {
         return json(result);
       } catch (e: any) {
         return json({ ok: false, total: 0, collected: 0, records: [], error: e?.message ?? '수집 실패' }, 502);
+      }
+    }
+
+    // 선택된 토지 → EUM 부분인쇄 HTML 일괄 생성
+    if (url.pathname === '/api/eum/print-html' && request.method === 'POST') {
+      let body: EumPrintRequest;
+      try {
+        body = (await request.json()) as EumPrintRequest;
+      } catch {
+        return json({ ok: false, error: '잘못된 요청 본문' }, 400);
+      }
+      const items = normalizeEumItems(body?.items);
+      if (!items?.length) {
+        return json({ ok: false, error: 'items 배열 필수' }, 400);
+      }
+      if (items.length > 50) {
+        return json({ ok: false, error: '한 번에 최대 50필지까지 인쇄할 수 있습니다.' }, 400);
+      }
+      try {
+        return html(await buildEumPrintHtml(items, env, ctx));
+      } catch (e: any) {
+        return json({ ok: false, error: e?.message ?? '토지이용계획 인쇄 HTML 생성 실패' }, 502);
       }
     }
 

@@ -1,10 +1,62 @@
 import { useMemo, useState } from 'react';
-import { collect, fetchLandInfo } from './api';
+import { collect, fetchEumPrintHtml, fetchLandInfo } from './api';
 import { downloadBatches, batchCount } from './lib/excel';
 import { printLandPdf } from './lib/landpdf';
-import type { PropertyRecord, LandInfo } from '../shared/types';
+import type { EumPrintItem, PropertyRecord, LandInfo } from '../shared/types';
 
 const won = (n: string) => (n ? Number(n).toLocaleString('ko-KR') : '');
+
+const escapeHtml = (value: unknown) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+function writeWindowMessage(w: Window, title: string, message: string) {
+  w.document.open();
+  w.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+    <style>
+      body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f7f8fb;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif; color:#111827; }
+      main { width:min(520px, calc(100vw - 40px)); padding:28px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; }
+      h1 { margin:0 0 10px; font-size:18px; }
+      p { margin:0; color:#6b7280; font-size:14px; line-height:1.6; white-space:pre-wrap; }
+    </style></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`);
+  w.document.close();
+  w.focus();
+}
+
+function waitForPrintableAssets(w: Window, timeoutMs = 8000) {
+  const images = Array.from(w.document.images);
+  const pending = images
+    .filter((img) => !img.complete)
+    .map((img) => new Promise<void>((resolve) => {
+      const done = () => resolve();
+      img.addEventListener('load', done, { once: true });
+      img.addEventListener('error', done, { once: true });
+    }));
+
+  return Promise.race([
+    Promise.all(pending).then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+function writeAndPrintWindow(w: Window, html: string) {
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+
+  const trigger = () => {
+    waitForPrintableAssets(w).then(() => setTimeout(() => w.print(), 400));
+  };
+
+  if (w.document.readyState === 'complete') trigger();
+  else w.addEventListener('load', trigger, { once: true });
+}
 
 type Row = {
   address: string;
@@ -251,6 +303,7 @@ export default function App() {
   const [landInfo, setLandInfo] = useState<Record<string, LandInfo>>({}); // pin → 공시지가·토지등급
   const [landLoading, setLandLoading] = useState(false);
   const [landDownloading, setLandDownloading] = useState(false);
+  const [eumPrintingKey, setEumPrintingKey] = useState<string | null>(null);
 
   // 전체 주소 통합 레코드 (고유번호 기준 중복 제거) — 다운로드용
   const exportRecords = useMemo(() => {
@@ -325,10 +378,16 @@ export default function App() {
     }
   }
 
+  // 선택된 토지 레코드
+  const selectedLandRecords = useMemo(
+    () => exportRecords.filter((rec) => rec.type === '토지'),
+    [exportRecords],
+  );
+
   // 선택된 토지 중 공시지가/토지등급 데이터가 있는 것
   const selectedLands = useMemo(
-    () => exportRecords.filter((rec) => rec.type === '토지' && landInfo[rec.pin]).map((rec) => landInfo[rec.pin]),
-    [exportRecords, landInfo],
+    () => selectedLandRecords.filter((rec) => landInfo[rec.pin]).map((rec) => landInfo[rec.pin]),
+    [selectedLandRecords, landInfo],
   );
 
   async function onLandDownload() {
@@ -339,6 +398,62 @@ export default function App() {
     } finally {
       setLandDownloading(false);
     }
+  }
+
+  function toEumPrintItem(rec: PropertyRecord): EumPrintItem {
+    const jiga = landInfo[rec.pin]?.jiga?.[0];
+    return {
+      key: rec.pin,
+      label: rec.pinFmt,
+      address: rec.address,
+      jigaText: jiga ? `${won(jiga.price)}원 (${jiga.year}/${jiga.month})` : undefined,
+    };
+  }
+
+  async function printEumRecords(records: PropertyRecord[], busyKey: string) {
+    if (!records.length || eumPrintingKey) return;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해 주세요.');
+      return;
+    }
+
+    writeWindowMessage(printWindow, '토지이용계획 생성 중', '토지이용계획 인쇄 문서를 만들고 있습니다.');
+    setEumPrintingKey(busyKey);
+
+    try {
+      const html = await fetchEumPrintHtml({
+        items: records.map(toEumPrintItem),
+      });
+      writeAndPrintWindow(printWindow, html);
+    } catch (e: any) {
+      writeWindowMessage(printWindow, '토지이용계획 생성 실패', e?.message ?? '토지이용계획 인쇄 HTML 생성에 실패했습니다.');
+    } finally {
+      setEumPrintingKey(null);
+    }
+  }
+
+  async function onEumPrint() {
+    await printEumRecords(selectedLandRecords, 'bulk');
+  }
+
+  async function onEumPrintOne(rec: PropertyRecord) {
+    await printEumRecords([rec], rec.pin);
+  }
+
+  function renderEumAction(rec: PropertyRecord) {
+    return (
+      <button
+        type="button"
+        className="row-action"
+        onClick={() => onEumPrintOne(rec)}
+        disabled={Boolean(eumPrintingKey) || landLoading}
+        title="이 필지의 토지이용계획을 PDF로 저장합니다."
+      >
+        {eumPrintingKey === rec.pin ? '생성 중…' : 'PDF 저장'}
+      </button>
+    );
   }
 
   function setSelectedPins(rowIndex: number, selectedPins: string[]) {
@@ -441,6 +556,22 @@ export default function App() {
         <div className="top-actions">
           <button className="dl" onClick={onDownload} disabled={!exportRecords.length || downloading}>
             {downloading ? '생성 중…' : `엑셀 다운로드 (${exportRecords.length}건 · ${nBatch}개 batch${nBatch > 1 ? ' zip' : ''})`}
+          </button>
+          <button
+            className="dl eum"
+            onClick={onEumPrint}
+            disabled={!selectedLandRecords.length || selectedLandRecords.length > 50 || Boolean(eumPrintingKey) || landLoading}
+            title={
+              selectedLandRecords.length > 50
+                ? '한 번에 최대 50필지까지 인쇄할 수 있습니다.'
+                : '체크된 토지의 토지이용계획 부분인쇄 문서를 하나로 합칩니다.'
+            }
+          >
+            {landLoading
+              ? '토지정보 조회 중…'
+              : eumPrintingKey === 'bulk'
+                ? '생성 중…'
+                : `토지이용계획 인쇄 (${selectedLandRecords.length}필지)`}
           </button>
           <button
             className="dl land"
@@ -572,6 +703,7 @@ export default function App() {
                               <th>부동산표시</th>
                               <th>공시지가</th>
                               <th>토지등급</th>
+                              <th>토지이용계획</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -601,9 +733,15 @@ export default function App() {
                                     )}
                                   </td>
                                   {(() => {
-                                    if (rec.type !== '토지') return (<><td className="land-cell">-</td><td className="land-cell">-</td></>);
+                                    if (rec.type !== '토지') return (<><td className="land-cell">-</td><td className="land-cell">-</td><td className="eum-cell">-</td></>);
                                     const li = landInfo[rec.pin];
-                                    if (!li) return (<><td className="land-cell">{landLoading ? '조회 중…' : '-'}</td><td className="land-cell">{landLoading ? '조회 중…' : '-'}</td></>);
+                                    if (!li) return (
+                                      <>
+                                        <td className="land-cell">{landLoading ? '조회 중…' : '-'}</td>
+                                        <td className="land-cell">{landLoading ? '조회 중…' : '-'}</td>
+                                        <td className="eum-cell">{renderEumAction(rec)}</td>
+                                      </>
+                                    );
                                     const jiga = li.jiga[0];
                                     const grade = li.grade[0];
                                     return (
@@ -614,6 +752,7 @@ export default function App() {
                                         <td className="land-cell">
                                           {grade ? <><strong>{grade.grade}</strong><span className="land-sub">{grade.changeDate}</span></> : '없음'}
                                         </td>
+                                        <td className="eum-cell">{renderEumAction(rec)}</td>
                                       </>
                                     );
                                   })()}

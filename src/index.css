@@ -23,6 +23,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
   flex-shrink: 0; height: 44px; padding: 0 18px; border: none; border-radius: 10px;
   background: var(--green); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
 }
+.dl.eum { background: #0f766e; }
 .dl.land { background: #7c3aed; }
 .dl:disabled { background: #cbd5e1; cursor: default; }
 
@@ -30,6 +31,14 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .land-cell.num { text-align: right; }
 .land-cell strong { font-weight: 700; }
 .land-cell .land-sub { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.eum-cell { white-space: nowrap; }
+.row-action {
+  height: 30px; padding: 0 10px; border: 1px solid #bfd7d2; border-radius: 8px;
+  background: #f0fdfa; color: #0f766e; font: inherit; font-size: 12px; font-weight: 800;
+  cursor: pointer;
+}
+.row-action:hover:not(:disabled) { border-color: #6bc5b8; background: #ccfbf1; }
+.row-action:disabled { border-color: var(--line); background: #f8fafc; color: #a6adba; cursor: default; }
 
 .form { display: flex; gap: 10px; margin-bottom: 24px; align-items: stretch; }
 .form textarea {
@@ -134,7 +143,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
   overflow-x: auto; background: #fff;
 }
 .records-table {
-  width: 100%; min-width: 1000px; border-collapse: collapse; font-size: 13px;
+  width: 100%; min-width: 1120px; border-collapse: collapse; font-size: 13px;
 }
 .records-table th,
 .records-table td {
@@ -171,5 +180,5 @@ h1 { font-size: 22px; margin: 0 0 4px; }
   .card-head { align-items: flex-start; }
   .head-side { padding-top: 1px; }
   .dl, .form .go { width: 100%; }
-  .records-table { min-width: 920px; }
+  .records-table { min-width: 1040px; }
 }
