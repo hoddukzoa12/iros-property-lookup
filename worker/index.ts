@@ -2,7 +2,7 @@
 import { collectAddress } from './iros/collect';
 import { refreshLdong, KV_META, type LdongMeta } from './ldong/refresh';
 import { addressesToPnu } from './ldong/lookup';
-import { fetchLandInfos } from './vworld/landinfo';
+import { fetchLandInfos } from './landinfo';
 import type { CollectRequest } from '../shared/types';
 
 export interface Env {

@@ -31,12 +31,10 @@ async function getMap(env: LdongEnv, ctx?: ExecutionContext): Promise<Record<str
   ]);
 
   if (!mapStr) {
-    // ② 부트스트랩: KV 비어있음 → 최초 1회 빌드 (블로킹)
-    const meta = await refreshLdong(env);
-    const fresh = await env.LDONG.get(KV_MAP);
-    const map = fresh ? JSON.parse(fresh) : {};
-    MEM = { map, builtAt: meta.builtAt };
-    return map;
+    // ② 부트스트랩: KV 비어있음(최초/전파지연) → 백그라운드 갱신만.
+    //    요청 경로에서 odcloud를 동기 호출하지 않음(520/지연으로 요청 실패 방지).
+    if (ctx) ctx.waitUntil(refreshLdong(env).then(() => { MEM = null; }).catch(() => {}));
+    return {};
   }
 
   const map: Record<string, string> = JSON.parse(mapStr);
