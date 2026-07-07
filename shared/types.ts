@@ -26,3 +26,36 @@ export interface CollectResponse {
   records: PropertyRecord[];
   error?: string;
 }
+
+// ── 토지 공시지가 + 토지등급 (V-World) ──────────────────────────
+export interface JigaRow {
+  year: string;        // 가격기준년도
+  month: string;       // 기준월 (2자리)
+  price: string;       // 개별공시지가(원/㎡)
+  publishDate: string; // 공시일자
+  jibun: string;       // 지번
+  addr: string;        // 토지소재지
+}
+export interface GradeRow {
+  kind: string;        // 등급구분 (토지/기준수확량)
+  grade: string;       // 등급
+  changeDate: string;  // 변동일
+}
+export interface LandInfo {
+  key: string;         // 매칭용 (부동산고유번호 pin)
+  address: string;
+  pnu: string | null;
+  jiga: JigaRow[];
+  grade: GradeRow[];
+  error?: string;
+}
+
+/** POST /api/landinfo 요청/응답 */
+export interface LandInfoRequest {
+  items: { key: string; address: string }[];
+}
+export interface LandInfoResponse {
+  ok: boolean;
+  results: LandInfo[];
+  error?: string;
+}

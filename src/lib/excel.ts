@@ -1,18 +1,51 @@
 // 일괄열람 등록양식 .xls(BIFF8) 생성 + 30건 단위 분할 + zip
-// 양식 구조: 시트명 '등록양식', A1 헤더, B1 안내, A2부터 4-4-6 하이픈 텍스트 (WORKFLOW.md §3)
+// 양식 구조: 시트명 '등록양식', A2부터 4-4-6 하이픈 텍스트, B열 이후 검토용 메타데이터
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import type { PropertyRecord } from '../../shared/types';
 
 export const BATCH_SIZE = 30;
 
-function buildBatchXls(pinsFmt: string[]): ArrayBuffer {
-  const aoa: (string)[][] = [['부동산고유번호(14자리)', '* 최대 30건까지 등록가능합니다.']];
-  for (const p of pinsFmt) aoa.push([p]);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  // 고유번호 셀을 명시적 텍스트로
-  for (let i = 0; i < pinsFmt.length; i++) {
-    ws[`A${i + 2}`] = { t: 's', v: pinsFmt[i] };
+const HEADERS = [
+  '부동산고유번호(14자리)',
+  '유형',
+  '주소',
+  '도로명주소',
+  '건물명',
+  '층',
+  '호',
+  '상태',
+];
+
+function buildBatchXls(records: PropertyRecord[]): ArrayBuffer {
+  const aoa: string[][] = [HEADERS];
+  for (const r of records) {
+    aoa.push([
+      r.pinFmt,
+      r.type,
+      r.address,
+      r.roadAddr,
+      r.building,
+      r.floor,
+      r.room,
+      r.useCls,
+    ]);
   }
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // IROS 업로드가 읽는 A열 고유번호 셀을 명시적 텍스트로 유지
+  for (let i = 0; i < records.length; i++) {
+    ws[`A${i + 2}`] = { t: 's', v: records[i].pinFmt };
+  }
+  ws['!cols'] = [
+    { wch: 20 },
+    { wch: 10 },
+    { wch: 34 },
+    { wch: 34 },
+    { wch: 22 },
+    { wch: 8 },
+    { wch: 8 },
+    { wch: 10 },
+  ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '등록양식');
   return XLSX.write(wb, { bookType: 'biff8', type: 'array' }) as ArrayBuffer;
@@ -39,9 +72,9 @@ export function batchCount(pinCount: number): number {
   return Math.ceil(pinCount / BATCH_SIZE);
 }
 
-/** 전체 고유번호(4-4-6) → 다운로드. 1개 batch면 .xls, 여러 개면 zip. */
-export async function downloadBatches(pinsFmt: string[], jobName = 'iros'): Promise<void> {
-  const batches = chunk(pinsFmt, BATCH_SIZE);
+/** 전체 레코드 → 등록양식 다운로드. 1개 batch면 .xls, 여러 개면 zip. */
+export async function downloadBatches(records: PropertyRecord[], jobName = 'iros'): Promise<void> {
+  const batches = chunk(records, BATCH_SIZE);
   if (batches.length === 0) return;
 
   if (batches.length === 1) {

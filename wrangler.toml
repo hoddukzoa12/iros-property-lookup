@@ -6,3 +6,13 @@ compatibility_date = "2024-11-01"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+# 법정동코드 캐시 (주소 → PNU 변환용). odcloud에서 갱신 → KV 저장.
+[[kv_namespaces]]
+binding = "LDONG"
+id = "44ac6675379f452d976b9ea9c5ebe24a"
+
+# 정기 갱신: 매월 1일 00:00 UTC → 법정동코드 재수집
+[triggers]
+crons = ["0 0 1 * *"]
+

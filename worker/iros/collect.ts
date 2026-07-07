@@ -47,18 +47,36 @@ function makeParam(swrd: string) {
 
 const fmtPin = (pin: string) => `${pin.slice(0, 4)}-${pin.slice(4, 8)}-${pin.slice(8, 14)}`;
 
+function textValue(value: unknown): string {
+  return String(value ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripTrailingBuilding(address: string, building: string): string {
+  if (!address || !building) return address;
+  return address.endsWith(building) ? address.slice(0, -building.length).trim() : address;
+}
+
 function normalize(d: any): PropertyRecord {
   const pin = String(d.pin ?? '');
+  const building = textValue(d.buld_name);
+  const address = stripTrailingBuilding(
+    textValue(d.real_indi_cont_detail) || textValue(d.real_indi_cont),
+    building,
+  );
+  const roadAddr = textValue(d.rd_addr_detail) || textValue(d.rd_addr);
   return {
     pin,
     pinFmt: pin.length === 14 ? fmtPin(pin) : pin,
     type: d.real_cls_cd ?? '',
-    address: d.real_indi_cont ?? '',
-    roadAddr: d.rd_addr ?? '',
-    building: d.buld_name ?? '',
-    floor: d.buld_no_floor ?? '',
-    room: d.buld_no_room ?? '',
-    useCls: d.use_cls_cd ?? '',
+    address,
+    roadAddr,
+    building,
+    floor: textValue(d.buld_no_floor),
+    room: textValue(d.buld_no_room),
+    useCls: textValue(d.use_cls_cd),
   };
 }
 
