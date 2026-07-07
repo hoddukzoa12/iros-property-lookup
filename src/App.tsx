@@ -495,7 +495,7 @@ export default function App() {
   }
 
   async function onDownload() {
-    if (!exportRecords.length) return;
+    if (!exportRecords.length || running) return;
     setDownloading(true);
     try {
       await downloadBatches(exportRecords);
@@ -554,8 +554,17 @@ export default function App() {
           <p className="sub">주소를 줄바꿈으로 여러 건 입력하세요. 시·도 없이 주소만 넣어도 됩니다.</p>
         </div>
         <div className="top-actions">
-          <button className="dl" onClick={onDownload} disabled={!exportRecords.length || downloading}>
-            {downloading ? '생성 중…' : `엑셀 다운로드 (${exportRecords.length}건 · ${nBatch}개 batch${nBatch > 1 ? ' zip' : ''})`}
+          <button
+            className="dl"
+            onClick={onDownload}
+            disabled={!exportRecords.length || running || downloading}
+            title={running ? '전체 조회가 끝난 뒤 엑셀 다운로드를 사용할 수 있습니다.' : undefined}
+          >
+            {running
+              ? '조회 완료 후 다운로드'
+              : downloading
+                ? '생성 중…'
+                : `엑셀 다운로드 (${exportRecords.length}건 · ${nBatch}개 batch${nBatch > 1 ? ' zip' : ''})`}
           </button>
           <button
             className="dl eum"
