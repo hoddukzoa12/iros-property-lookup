@@ -3,8 +3,16 @@ import { collectAddress } from './iros/collect';
 import { refreshLdong, KV_META, type LdongMeta } from './ldong/refresh';
 import { addressesToPnu } from './ldong/lookup';
 import { fetchLandInfos } from './landinfo';
+import { fetchBuildingTrades } from './trade';
+import { fetchCommercialPrices } from './commercial-price';
 import { buildEumPrintHtml } from './eum/print';
-import type { CollectRequest, EumPrintItem, EumPrintRequest } from '../shared/types';
+import type {
+  BuildingTradeRequest,
+  CollectRequest,
+  CommercialPriceRequest,
+  EumPrintItem,
+  EumPrintRequest,
+} from '../shared/types';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -40,6 +48,36 @@ function normalizeEumItems(value: unknown): EumPrintItem[] | null {
       address: String(item?.address ?? '').trim(),
       label: item?.label == null ? undefined : String(item.label).trim(),
       jigaText: item?.jigaText == null ? undefined : String(item.jigaText).trim(),
+    }))
+    .filter((item) => item.key && item.address);
+}
+
+function normalizeBuildingTradeItems(value: unknown): BuildingTradeRequest['items'] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((item: any) => ({
+      key: String(item?.key ?? '').trim(),
+      address: String(item?.address ?? '').trim(),
+      roadAddr: item?.roadAddr == null ? undefined : String(item.roadAddr).trim(),
+      building: item?.building == null ? undefined : String(item.building).trim(),
+      floor: item?.floor == null ? undefined : String(item.floor).trim(),
+      room: item?.room == null ? undefined : String(item.room).trim(),
+      type: item?.type == null ? undefined : String(item.type).trim(),
+    }))
+    .filter((item) => item.key && item.address);
+}
+
+function normalizeCommercialPriceItems(value: unknown): CommercialPriceRequest['items'] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((item: any) => ({
+      key: String(item?.key ?? '').trim(),
+      address: String(item?.address ?? '').trim(),
+      roadAddr: item?.roadAddr == null ? undefined : String(item.roadAddr).trim(),
+      building: item?.building == null ? undefined : String(item.building).trim(),
+      floor: item?.floor == null ? undefined : String(item.floor).trim(),
+      room: item?.room == null ? undefined : String(item.room).trim(),
+      type: item?.type == null ? undefined : String(item.type).trim(),
     }))
     .filter((item) => item.key && item.address);
 }
@@ -149,6 +187,52 @@ export default {
         return json({ ok: true, results });
       } catch (e: any) {
         return json({ ok: false, error: e?.message ?? '조회 실패' }, 502);
+      }
+    }
+
+    // 선택된 건물/집합건물 → 최근 1년 매매 실거래가 4종 조회
+    if (url.pathname === '/api/building-trades' && request.method === 'POST') {
+      let body: BuildingTradeRequest;
+      try {
+        body = (await request.json()) as BuildingTradeRequest;
+      } catch {
+        return json({ ok: false, error: '잘못된 요청 본문' }, 400);
+      }
+      const items = normalizeBuildingTradeItems(body?.items);
+      if (!items) {
+        return json({ ok: false, error: 'items 배열 필수' }, 400);
+      }
+      if (items.length > 1000) {
+        return json({ ok: false, error: '한 번에 최대 1000개 건물까지 조회할 수 있습니다.' }, 400);
+      }
+      try {
+        const results = await fetchBuildingTrades(items, env, ctx);
+        return json({ ok: true, results });
+      } catch (e: any) {
+        return json({ ok: false, error: e?.message ?? '실거래가 조회 실패' }, 502);
+      }
+    }
+
+    // 건물/집합건물 → Hometax 상가/오피스텔 기준시가 조회
+    if (url.pathname === '/api/commercial-prices' && request.method === 'POST') {
+      let body: CommercialPriceRequest;
+      try {
+        body = (await request.json()) as CommercialPriceRequest;
+      } catch {
+        return json({ ok: false, error: '잘못된 요청 본문' }, 400);
+      }
+      const items = normalizeCommercialPriceItems(body?.items);
+      if (!items) {
+        return json({ ok: false, error: 'items 배열 필수' }, 400);
+      }
+      if (items.length > 1000) {
+        return json({ ok: false, error: '한 번에 최대 1000개 건물까지 조회할 수 있습니다.' }, 400);
+      }
+      try {
+        const results = await fetchCommercialPrices(items, env, ctx);
+        return json({ ok: true, results });
+      } catch (e: any) {
+        return json({ ok: false, error: e?.message ?? '상가/오피스 기준시가 조회 실패' }, 502);
       }
     }
 

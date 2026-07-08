@@ -1,5 +1,7 @@
 import type {
+  BuildingTradeRequest, BuildingTradeResponse,
   CollectRequest, CollectResponse,
+  CommercialPriceRequest, CommercialPriceResponse,
   EumPrintRequest,
   LandInfoRequest, LandInfoResponse,
 } from '../shared/types';
@@ -20,6 +22,24 @@ export async function fetchLandInfo(req: LandInfoRequest): Promise<LandInfoRespo
     body: JSON.stringify(req),
   });
   return (await res.json()) as LandInfoResponse;
+}
+
+export async function fetchBuildingTrades(req: BuildingTradeRequest): Promise<BuildingTradeResponse> {
+  const res = await fetch('/api/building-trades', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  return (await res.json()) as BuildingTradeResponse;
+}
+
+export async function fetchCommercialPrices(req: CommercialPriceRequest): Promise<CommercialPriceResponse> {
+  const res = await fetch('/api/commercial-prices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  return (await res.json()) as CommercialPriceResponse;
 }
 
 export async function fetchEumPrintHtml(req: EumPrintRequest): Promise<string> {

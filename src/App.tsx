@@ -1,10 +1,25 @@
 import { useMemo, useState } from 'react';
-import { collect, fetchEumPrintHtml, fetchLandInfo } from './api';
+import { collect, fetchBuildingTrades, fetchCommercialPrices, fetchEumPrintHtml, fetchLandInfo } from './api';
 import { downloadBatches, batchCount } from './lib/excel';
 import { printLandPdf } from './lib/landpdf';
-import type { EumPrintItem, PropertyRecord, LandInfo } from '../shared/types';
+import { downloadTradeWorkbook, downloadTradeZip } from './lib/tradeExcel';
+import { printTradePdf } from './lib/tradePdf';
+import { downloadCommercialPriceWorkbook } from './lib/commercialPriceExcel';
+import { printCommercialPricePdf } from './lib/commercialPricePdf';
+import type {
+  BuildingTradeInfo,
+  BuildingTradeRequestItem,
+  CommercialPriceInfo,
+  CommercialPriceRequestItem,
+  EumPrintItem,
+  LandInfo,
+  PropertyRecord,
+} from '../shared/types';
 
 const won = (n: string) => (n ? Number(n).toLocaleString('ko-KR') : '');
+const manwon = (n: number | null) => (n == null ? '' : `${n.toLocaleString('ko-KR')}만원`);
+const wonPerM2 = (n: number | null) => (n == null ? '' : `${n.toLocaleString('ko-KR')}원/㎡`);
+const areaM2 = (n: number | null) => (n == null ? '' : `${n.toLocaleString('ko-KR', { maximumFractionDigits: 3 })}㎡`);
 
 const escapeHtml = (value: unknown) =>
   String(value ?? '')
@@ -100,6 +115,10 @@ const TYPE_FILTER_OPTIONS: { value: TypeFilter; label: string }[] = [
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function isBuildingRecord(rec: PropertyRecord) {
+  return rec.type !== '토지';
+}
 
 type ParsedLot = {
   dong?: string;
@@ -303,6 +322,15 @@ export default function App() {
   const [landInfo, setLandInfo] = useState<Record<string, LandInfo>>({}); // pin → 공시지가·토지등급
   const [landLoading, setLandLoading] = useState(false);
   const [landDownloading, setLandDownloading] = useState(false);
+  const [tradeInfo, setTradeInfo] = useState<Record<string, BuildingTradeInfo>>({}); // pin → 최근 1년 실거래가
+  const [tradeLoading, setTradeLoading] = useState(false);
+  const [tradeDownloading, setTradeDownloading] = useState(false);
+  const [tradeDownloadingKey, setTradeDownloadingKey] = useState<string | null>(null);
+  const [tradePdfPrintingKey, setTradePdfPrintingKey] = useState<string | null>(null);
+  const [commercialPriceInfo, setCommercialPriceInfo] = useState<Record<string, CommercialPriceInfo>>({});
+  const [commercialPriceLoading, setCommercialPriceLoading] = useState(false);
+  const [commercialPriceDownloadingKey, setCommercialPriceDownloadingKey] = useState<string | null>(null);
+  const [commercialPricePdfPrintingKey, setCommercialPricePdfPrintingKey] = useState<string | null>(null);
   const [eumPrintingKey, setEumPrintingKey] = useState<string | null>(null);
 
   // 전체 주소 통합 레코드 (고유번호 기준 중복 제거) — 다운로드용
@@ -325,12 +353,15 @@ export default function App() {
     setRunning(true);
     setExpandedRows({});
     setLandInfo({});
+    setTradeInfo({});
+    setCommercialPriceInfo({});
     setRows(addresses.map((a) => ({ address: a, status: 'pending', records: [], selectedPins: [], total: 0 })));
 
     const update = (i: number, patch: Partial<Row>) =>
       setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
     const landItems: { key: string; address: string }[] = [];
+    const buildingRecords: PropertyRecord[] = [];
 
     let next = 0;
     const worker = async () => {
@@ -347,8 +378,10 @@ export default function App() {
             setExpandedRows((prev) => ({ ...prev, [i]: shouldExpandByDefault(kinds, selectedPins.length) }));
             update(i, { status: 'done', records: res.records, selectedPins, total: res.total });
             // 토지만 공시지가·토지등급 대상으로 수집
-            for (const rec of res.records)
+            for (const rec of res.records) {
               if (rec.type === '토지') landItems.push({ key: rec.pin, address: rec.address });
+              else buildingRecords.push(rec);
+            }
           }
           else {
             setExpandedRows((prev) => ({ ...prev, [i]: true }));
@@ -364,17 +397,103 @@ export default function App() {
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, addresses.length) }, worker));
     setRunning(false);
 
-    // 토지 공시지가·토지등급 조회 → 컬럼 채움
-    if (landItems.length) {
-      setLandLoading(true);
-      try {
-        const res = await fetchLandInfo({ items: landItems });
-        if (res.ok) {
-          setLandInfo(Object.fromEntries(res.results.map((r) => [r.key, r])));
-        }
-      } finally {
-        setLandLoading(false);
+    await Promise.all([
+      loadLandInfo(landItems),
+      loadBuildingTrades(buildingRecords),
+      loadCommercialPrices(buildingRecords),
+    ]);
+  }
+
+  async function loadLandInfo(items: { key: string; address: string }[]) {
+    if (!items.length) return;
+    setLandLoading(true);
+    try {
+      const res = await fetchLandInfo({ items });
+      if (res.ok) {
+        setLandInfo((prev) => ({ ...prev, ...Object.fromEntries(res.results.map((r) => [r.key, r])) }));
       }
+    } finally {
+      setLandLoading(false);
+    }
+  }
+
+  function toBuildingTradeItem(rec: PropertyRecord): BuildingTradeRequestItem {
+    return {
+      key: rec.pin,
+      address: rec.address,
+      roadAddr: rec.roadAddr,
+      building: rec.building,
+      floor: rec.floor,
+      room: rec.room,
+      type: rec.type,
+    };
+  }
+
+  async function loadBuildingTrades(records: PropertyRecord[]) {
+    const seen = new Set<string>();
+    const items = records
+      .filter(isBuildingRecord)
+      .filter((rec) => {
+        if (seen.has(rec.pin)) return false;
+        seen.add(rec.pin);
+        return true;
+      })
+      .map(toBuildingTradeItem);
+
+    if (!items.length) return {};
+
+    setTradeLoading(true);
+    try {
+      const res = await fetchBuildingTrades({ items });
+      if (!res.ok) {
+        alert(res.error ?? '실거래가 조회에 실패했습니다.');
+        return {};
+      }
+      const next = Object.fromEntries(res.results.map((r) => [r.key, r]));
+      setTradeInfo((prev) => ({ ...prev, ...next }));
+      return next;
+    } finally {
+      setTradeLoading(false);
+    }
+  }
+
+  function toCommercialPriceItem(rec: PropertyRecord): CommercialPriceRequestItem {
+    return {
+      key: rec.pin,
+      address: rec.address,
+      roadAddr: rec.roadAddr,
+      building: rec.building,
+      floor: rec.floor,
+      room: rec.room,
+      type: rec.type,
+    };
+  }
+
+  async function loadCommercialPrices(records: PropertyRecord[]) {
+    const seen = new Set<string>();
+    const items = records
+      .filter(isBuildingRecord)
+      .filter((rec) => {
+        if (seen.has(rec.pin)) return false;
+        seen.add(rec.pin);
+        return true;
+      })
+      .map(toCommercialPriceItem);
+
+    if (!items.length) return {};
+
+    setCommercialPriceLoading(true);
+    try {
+      const res = await fetchCommercialPrices({ items });
+      if (!res.ok) {
+        alert(res.error ?? '상가/오피스 기준시가 조회에 실패했습니다.');
+        return {};
+      }
+      const next = Object.fromEntries(res.results.map((r) => [r.key, r]));
+      setCommercialPriceInfo((prev) => ({ ...prev, ...next }));
+      return next;
+    } finally {
+      setCommercialPriceLoading(false);
     }
   }
 
@@ -383,6 +502,19 @@ export default function App() {
     () => exportRecords.filter((rec) => rec.type === '토지'),
     [exportRecords],
   );
+
+  const allBuildingRecords = useMemo(() => {
+    const seen = new Set<string>();
+    const records: PropertyRecord[] = [];
+    for (const r of rows) {
+      for (const rec of r.records) {
+        if (!isBuildingRecord(rec) || seen.has(rec.pin)) continue;
+        seen.add(rec.pin);
+        records.push(rec);
+      }
+    }
+    return records;
+  }, [rows]);
 
   // 선택된 토지 중 공시지가/토지등급 데이터가 있는 것
   const selectedLands = useMemo(
@@ -456,6 +588,118 @@ export default function App() {
     );
   }
 
+  function renderTradeCell(rec: PropertyRecord) {
+    const info = tradeInfo[rec.pin];
+    const busy = tradeDownloadingKey === rec.pin;
+    let summary = <span>{tradeLoading ? '조회 중…' : '-'}</span>;
+
+    if (info && !info.items.length) {
+      summary = (
+        <span>
+          {info.error ? '오류' : '없음'}
+          {info.error && <span className="trade-sub">{info.error}</span>}
+        </span>
+      );
+    }
+
+    if (info?.items.length) {
+      const latest = info.items[0];
+      const candidateCount = info.items.filter((item) => item.matchLevel === 'candidate').length;
+      const sourceSummary = ['아파트', '단독다가구', '연립다세대', '오피스텔']
+        .map((label) => {
+          const count = info.items.filter((item) => item.sourceLabel === label).length;
+          return count ? `${label} ${count}` : '';
+        })
+        .filter(Boolean)
+        .join(' · ');
+
+      summary = (
+        <span>
+          <strong>{info.items.length}건</strong>
+          <span className="trade-sub">
+            {latest.sourceLabel} {latest.dealDate} {manwon(latest.dealAmountManwon)}
+          </span>
+          <span className="trade-sub">{sourceSummary}{candidateCount ? ` · 후보 ${candidateCount}` : ''}</span>
+        </span>
+      );
+    }
+
+    return (
+      <span>
+        {summary}
+        <button
+          type="button"
+          className="row-action trade-download"
+          onClick={() => onTradeDownloadOne(rec)}
+          disabled={running || tradeLoading || tradeDownloading || Boolean(tradeDownloadingKey) || Boolean(tradePdfPrintingKey)}
+          title="이 건물의 실거래가만 엑셀로 저장합니다."
+        >
+          {busy ? '생성 중…' : '엑셀'}
+        </button>
+        <button
+          type="button"
+          className="row-action trade-download"
+          onClick={() => onTradePdfOne(rec)}
+          disabled={running || tradeLoading || tradeDownloading || Boolean(tradeDownloadingKey) || Boolean(tradePdfPrintingKey)}
+          title="이 건물의 실거래가만 PDF로 저장합니다."
+        >
+          {tradePdfPrintingKey === rec.pin ? '출력 중…' : 'PDF'}
+        </button>
+      </span>
+    );
+  }
+
+  function renderCommercialPriceCell(rec: PropertyRecord) {
+    const info = commercialPriceInfo[rec.pin];
+    const busy = commercialPriceDownloadingKey === rec.pin;
+    let summary = <span>{commercialPriceLoading ? '조회 중…' : '-'}</span>;
+
+    if (info && !info.items.length) {
+      summary = (
+        <span>
+          {info.error ? '오류' : '없음'}
+          {info.error && <span className="commercial-sub">{info.error}</span>}
+        </span>
+      );
+    }
+
+    if (info?.items.length) {
+      const latest = info.items[0];
+      const yearCount = new Set(info.items.map((item) => item.noticeDate.slice(0, 4))).size;
+      summary = (
+        <span>
+          <strong>{latest.noticeDate}</strong>
+          <span className="commercial-sub">{wonPerM2(latest.unitPrice)} · {areaM2(latest.buildingArea)}</span>
+          <span className="commercial-sub">{latest.kind}{yearCount > 1 ? ` · ${yearCount}개년` : ''}</span>
+        </span>
+      );
+    }
+
+    return (
+      <span>
+        {summary}
+        <button
+          type="button"
+          className="row-action commercial-download"
+          onClick={() => onCommercialPriceDownloadOne(rec)}
+          disabled={running || commercialPriceLoading || Boolean(commercialPriceDownloadingKey) || Boolean(commercialPricePdfPrintingKey)}
+          title="이 건물의 상가/오피스 기준시가를 엑셀로 저장합니다."
+        >
+          {busy ? '생성 중…' : '엑셀'}
+        </button>
+        <button
+          type="button"
+          className="row-action commercial-download"
+          onClick={() => onCommercialPricePdfOne(rec)}
+          disabled={running || commercialPriceLoading || Boolean(commercialPriceDownloadingKey) || Boolean(commercialPricePdfPrintingKey)}
+          title="이 건물의 상가/오피스 기준시가를 PDF로 저장합니다."
+        >
+          {commercialPricePdfPrintingKey === rec.pin ? '출력 중…' : 'PDF'}
+        </button>
+      </span>
+    );
+  }
+
   function setSelectedPins(rowIndex: number, selectedPins: string[]) {
     setRows((prev) => prev.map((r, idx) => (idx === rowIndex ? { ...r, selectedPins } : r)));
   }
@@ -501,6 +745,92 @@ export default function App() {
       await downloadBatches(exportRecords);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function onTradeDownload() {
+    if (!allBuildingRecords.length || running || tradePdfPrintingKey) return;
+
+    setTradeDownloading(true);
+    try {
+      const missing = allBuildingRecords.filter((rec) => !tradeInfo[rec.pin]);
+      const loaded = missing.length ? await loadBuildingTrades(missing) : {};
+      const downloaded = await downloadTradeZip(allBuildingRecords, { ...tradeInfo, ...loaded });
+      if (!downloaded) alert('조회된 건물의 실거래가 데이터가 없습니다.');
+    } finally {
+      setTradeDownloading(false);
+    }
+  }
+
+  async function onTradeDownloadOne(rec: PropertyRecord) {
+    if (running || tradeLoading || tradeDownloading || tradeDownloadingKey || tradePdfPrintingKey) return;
+
+    setTradeDownloadingKey(rec.pin);
+    try {
+      const loaded = tradeInfo[rec.pin] ? {} : await loadBuildingTrades([rec]);
+      const downloaded = downloadTradeWorkbook(
+        [rec],
+        { ...tradeInfo, ...loaded },
+      );
+      if (!downloaded) alert('이 건물의 실거래가 데이터가 없습니다.');
+    } finally {
+      setTradeDownloadingKey(null);
+    }
+  }
+
+  async function onTradePdf() {
+    if (!allBuildingRecords.length || running || tradeDownloading || tradeDownloadingKey || tradePdfPrintingKey) return;
+
+    setTradePdfPrintingKey('bulk');
+    try {
+      const missing = allBuildingRecords.filter((rec) => !tradeInfo[rec.pin]);
+      const loaded = missing.length ? await loadBuildingTrades(missing) : {};
+      const printed = printTradePdf(allBuildingRecords, { ...tradeInfo, ...loaded });
+      if (!printed) alert('조회된 건물의 실거래가 데이터가 없습니다.');
+    } finally {
+      setTradePdfPrintingKey(null);
+    }
+  }
+
+  async function onTradePdfOne(rec: PropertyRecord) {
+    if (running || tradeLoading || tradeDownloading || tradeDownloadingKey || tradePdfPrintingKey) return;
+
+    setTradePdfPrintingKey(rec.pin);
+    try {
+      const loaded = tradeInfo[rec.pin] ? {} : await loadBuildingTrades([rec]);
+      const printed = printTradePdf([rec], { ...tradeInfo, ...loaded });
+      if (!printed) alert('이 건물의 실거래가 데이터가 없습니다.');
+    } finally {
+      setTradePdfPrintingKey(null);
+    }
+  }
+
+  async function onCommercialPriceDownloadOne(rec: PropertyRecord) {
+    if (running || commercialPriceLoading || commercialPriceDownloadingKey || commercialPricePdfPrintingKey) return;
+
+    setCommercialPriceDownloadingKey(rec.pin);
+    try {
+      const loaded = commercialPriceInfo[rec.pin] ? {} : await loadCommercialPrices([rec]);
+      const downloaded = downloadCommercialPriceWorkbook(
+        rec,
+        { ...commercialPriceInfo, ...loaded },
+      );
+      if (!downloaded) alert('이 건물의 상가/오피스 기준시가 데이터가 없습니다.');
+    } finally {
+      setCommercialPriceDownloadingKey(null);
+    }
+  }
+
+  async function onCommercialPricePdfOne(rec: PropertyRecord) {
+    if (running || commercialPriceLoading || commercialPriceDownloadingKey || commercialPricePdfPrintingKey) return;
+
+    setCommercialPricePdfPrintingKey(rec.pin);
+    try {
+      const loaded = commercialPriceInfo[rec.pin] ? {} : await loadCommercialPrices([rec]);
+      const printed = printCommercialPricePdf([rec], { ...commercialPriceInfo, ...loaded });
+      if (!printed) alert('이 건물의 상가/오피스 기준시가 데이터가 없습니다.');
+    } finally {
+      setCommercialPricePdfPrintingKey(null);
     }
   }
 
@@ -575,6 +905,28 @@ export default function App() {
               : downloading
                 ? '생성 중…'
                 : `엑셀 다운로드 (${exportRecords.length}건 · ${nBatch}개 batch${nBatch > 1 ? ' zip' : ''})`}
+          </button>
+          <button
+            className="dl trade"
+            onClick={onTradeDownload}
+            disabled={!allBuildingRecords.length || running || tradeLoading || tradeDownloading || Boolean(tradeDownloadingKey) || Boolean(tradePdfPrintingKey)}
+            title={running ? '전체 조회가 끝난 뒤 실거래가 엑셀을 사용할 수 있습니다.' : '조회된 전체 건물의 실거래가 엑셀을 건별로 만들어 ZIP으로 저장합니다.'}
+          >
+            {running
+              ? '조회 완료 후 다운로드'
+              : tradeLoading
+                ? '실거래가 조회 중…'
+                : tradeDownloading
+                  ? '생성 중…'
+                  : `실거래가 ZIP (${allBuildingRecords.length}건)`}
+          </button>
+          <button
+            className="dl trade-pdf"
+            onClick={onTradePdf}
+            disabled={!allBuildingRecords.length || running || tradeLoading || tradeDownloading || Boolean(tradeDownloadingKey) || Boolean(tradePdfPrintingKey)}
+            title="조회된 전체 건물의 실거래가를 PDF 출력 문서로 엽니다."
+          >
+            {tradePdfPrintingKey === 'bulk' ? 'PDF 생성 중…' : `실거래가 PDF (${allBuildingRecords.length}건)`}
           </button>
           <button
             className="dl eum"
@@ -727,6 +1079,8 @@ export default function App() {
                               <th>공시지가</th>
                               <th>토지등급</th>
                               <th>토지이용계획</th>
+                              <th>상가/오피스 기준시가</th>
+                              <th>실거래가</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -756,13 +1110,25 @@ export default function App() {
                                     )}
                                   </td>
                                   {(() => {
-                                    if (rec.type !== '토지') return (<><td className="land-cell">-</td><td className="land-cell">-</td><td className="eum-cell">-</td></>);
+                                    if (rec.type !== '토지') {
+                                      return (
+                                        <>
+                                          <td className="land-cell">-</td>
+                                          <td className="land-cell">-</td>
+                                          <td className="eum-cell">-</td>
+                                          <td className="commercial-price-cell">{renderCommercialPriceCell(rec)}</td>
+                                          <td className="trade-cell">{renderTradeCell(rec)}</td>
+                                        </>
+                                      );
+                                    }
                                     const li = landInfo[rec.pin];
                                     if (!li) return (
                                       <>
                                         <td className="land-cell">{landLoading ? '조회 중…' : '-'}</td>
                                         <td className="land-cell">{landLoading ? '조회 중…' : '-'}</td>
                                         <td className="eum-cell">{renderEumAction(rec)}</td>
+                                        <td className="commercial-price-cell">-</td>
+                                        <td className="trade-cell">-</td>
                                       </>
                                     );
                                     const jiga = li.jiga[0];
@@ -776,6 +1142,8 @@ export default function App() {
                                           {grade ? <><strong>{grade.grade}</strong><span className="land-sub">{grade.changeDate}</span></> : '없음'}
                                         </td>
                                         <td className="eum-cell">{renderEumAction(rec)}</td>
+                                        <td className="commercial-price-cell">-</td>
+                                        <td className="trade-cell">-</td>
                                       </>
                                     );
                                   })()}

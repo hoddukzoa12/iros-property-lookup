@@ -19,6 +19,7 @@
 ### 내보내기
 - **엑셀 다운로드** — 선택 고유번호를 일괄열람 등록양식 `.xls`(BIFF8)로. 30건 단위 분할, 여러 개면 zip
 - **토지 다운로드** — 선택한 토지의 **개별공시지가 + 토지등급**을 하나의 PDF로 병합 (필지마다 공시지가 페이지 → 토지등급 페이지)
+- **상가/오피스 기준시가** — 건물·집합건물의 상업용 건물/오피스텔 기준시가를 Hometax 실시간 조회로 가져오고, 행별 XLSX/PDF로 저장
 
 ---
 
@@ -30,6 +31,7 @@
 | 법정동코드 (주소→PNU) | data.go.kr / odcloud (15123287) | 배치 수집 → KV 캐시 |
 | 개별공시지가 | 국토부(온나라) | LH 씨:리얼 프록시 |
 | 토지등급 | 국토부(NSDI) | LH 씨:리얼 프록시 |
+| 상가/오피스텔 기준시가 | 국세청 Hometax | 주소→PNU 후 건물·층·호 기준 실시간 조회 |
 
 > 공시지가·토지등급은 원래 V-World 공식 API로 붙이려 했으나, **Cloudflare Worker → api.vworld.kr 이 520으로 차단**되어(오렌지-투-오렌지) 동일 원천을 제공하는 LH 경로로 전환했다. 제공자는 코드에서 추상화(`worker/landinfo/`)돼 있어, 비-Cloudflare 프록시가 생기면 V-World로 되돌릴 수 있다.
 
@@ -43,10 +45,10 @@ Cloudflare Worker (정적 자산 + /api/*)
         │
         ├─ /api/collect    → iros.go.kr 검색 (고유번호 수집)
         ├─ /api/landinfo   → 주소 → PNU → LH (공시지가·토지등급)
+        ├─ /api/commercial-prices → 주소 → PNU → Hometax (상가/오피스 기준시가)
         └─ /api/pnu        → 주소 → PNU
                               │
                      [법정동코드 캐시] Cloudflare KV
-                              ↑ odcloud 배치 수집 (Cron 월1회 등)
 ```
 
 - 브라우저는 등기소·LH를 직접 못 부르고(CORS/차단) V-World는 Cloudflare에서 막히므로, **Worker가 모든 외부 호출을 대행**한다.
@@ -69,6 +71,7 @@ Cloudflare Worker (정적 자산 + /api/*)
 |---|---|
 | `POST /api/collect` | `{address}` → 부동산고유번호 목록 |
 | `POST /api/landinfo` | `{items:[{key,address}]}` → 토지별 공시지가·토지등급 |
+| `POST /api/commercial-prices` | `{items:[{key,address,building,floor,room}]}` → 상가/오피스 기준시가 |
 | `POST /api/pnu` | `{addresses:[]}` → PNU 목록 |
 | `GET /api/ldong/status` | 법정동코드 캐시 상태(건수·빌드시각) |
 | `POST /api/admin/refresh-ldong` | 캐시 강제 갱신 (`ADMIN_TOKEN` 보호) |
@@ -98,7 +101,7 @@ npx wrangler secret put ODCLOUD_API_KEY
 npx wrangler secret put VWORLD_API_KEY
 ```
 
-배포에는 KV 네임스페이스(`LDONG`)와 Cron이 `wrangler.toml`에 설정돼 있다.
+배포에는 KV 네임스페이스(`LDONG`)와 Cron이 `wrangler.toml`에 설정돼 있다. 상가/오피스 기준시가는 D1/R2 적재 없이 Hometax를 실시간 조회하며, 지번 주소는 KV의 법정동코드로 도로명 검색 단계를 생략한다.
 
 ---
 
@@ -107,6 +110,7 @@ npx wrangler secret put VWORLD_API_KEY
 - **매칭 분류**: 재개발·지번합병으로 지번이 바뀐 필지가 '주의'로 과분류됨 ([#1](../../issues/1))
 - **토지 다운로드**: 원클릭 파일 다운로드가 아닌 브라우저 인쇄(→PDF 저장) 방식 ([#2](../../issues/2))
 - **LH 의존**: 공시지가·토지등급은 공식 API가 아닌 LH 사이트 프록시라 사이트 개편 시 영향받을 수 있음
+- **기준시가 매칭**: 동일 필지에 여러 건물이 있을 수 있어, PNU만으로 붙이지 않고 등기부의 건물명·층·호와 Hometax의 건물·층·호가 맞는 경우만 표시한다.
 
 ---
 
