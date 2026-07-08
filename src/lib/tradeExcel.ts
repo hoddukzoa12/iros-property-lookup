@@ -7,12 +7,15 @@ import type {
   PropertyRecord,
 } from '../../shared/types';
 
-const SOURCE_LABELS: Record<BuildingTradeSource, string> = {
+type ExportTradeSource = Exclude<BuildingTradeSource, 'single'>;
+
+const SOURCE_LABELS: Record<ExportTradeSource, string> = {
   apt: '아파트',
-  single: '단독다가구',
   rowhouse: '연립다세대',
   officetel: '오피스텔',
 };
+
+const EXPORT_SOURCES: ExportTradeSource[] = ['apt', 'rowhouse', 'officetel'];
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -101,7 +104,7 @@ export function tradeWorkbookFilename(record: PropertyRecord) {
 }
 
 function itemRows(
-  source: BuildingTradeSource,
+  source: ExportTradeSource,
   records: PropertyRecord[],
   tradeInfoByPin: Record<string, BuildingTradeInfo>,
 ) {
@@ -152,7 +155,7 @@ function buildTradeWorkbookBuffer(
 
   const wb = XLSX.utils.book_new();
 
-  (Object.keys(SOURCE_LABELS) as BuildingTradeSource[]).forEach((source) => {
+  EXPORT_SOURCES.forEach((source) => {
     const rows = itemRows(source, records, tradeInfoByPin);
     if (!rows.length) return;
 

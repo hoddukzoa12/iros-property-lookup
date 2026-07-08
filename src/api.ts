@@ -4,6 +4,7 @@ import type {
   CommercialPriceRequest, CommercialPriceResponse,
   EumPrintRequest,
   LandInfoRequest, LandInfoResponse,
+  RealtyPriceRequest, RealtyPriceResponse,
 } from '../shared/types';
 
 export async function collect(req: CollectRequest): Promise<CollectResponse> {
@@ -40,6 +41,15 @@ export async function fetchCommercialPrices(req: CommercialPriceRequest): Promis
     body: JSON.stringify(req),
   });
   return (await res.json()) as CommercialPriceResponse;
+}
+
+export async function fetchRealtyPrices(req: RealtyPriceRequest): Promise<RealtyPriceResponse> {
+  const res = await fetch('/api/realty-prices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  return (await res.json()) as RealtyPriceResponse;
 }
 
 export async function fetchEumPrintHtml(req: EumPrintRequest): Promise<string> {

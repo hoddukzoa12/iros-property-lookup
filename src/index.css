@@ -53,6 +53,11 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .commercial-price-cell .commercial-sub { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; white-space: normal; }
 .commercial-price-cell .commercial-download { display: inline-flex; align-items: center; margin-top: 6px; }
 .commercial-price-cell .commercial-download + .commercial-download { margin-left: 4px; }
+.realty-price-cell { min-width: 210px; white-space: nowrap; }
+.realty-price-cell strong { font-weight: 800; }
+.realty-price-cell .realty-sub { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; white-space: normal; }
+.realty-price-cell .realty-download { display: inline-flex; align-items: center; margin-top: 6px; }
+.realty-price-cell .realty-download + .realty-download { margin-left: 4px; }
 .row-action {
   height: 30px; padding: 0 10px; border: 1px solid #bfd7d2; border-radius: 8px;
   background: #f0fdfa; color: #0f766e; font: inherit; font-size: 12px; font-weight: 800;
@@ -164,7 +169,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
   overflow-x: auto; background: #fff;
 }
 .records-table {
-  width: 100%; min-width: 1470px; border-collapse: collapse; font-size: 13px;
+  width: 100%; min-width: 1890px; border-collapse: collapse; font-size: 13px;
 }
 .records-table th,
 .records-table td {
@@ -201,5 +206,5 @@ h1 { font-size: 22px; margin: 0 0 4px; }
   .card-head { align-items: flex-start; }
   .head-side { padding-top: 1px; }
   .dl, .form .go { width: 100%; }
-  .records-table { min-width: 1390px; }
+  .records-table { min-width: 1810px; }
 }

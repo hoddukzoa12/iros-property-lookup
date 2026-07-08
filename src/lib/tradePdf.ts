@@ -5,12 +5,15 @@ import type {
   PropertyRecord,
 } from '../../shared/types';
 
-const SOURCE_LABELS: Record<BuildingTradeSource, string> = {
+type ExportTradeSource = Exclude<BuildingTradeSource, 'single'>;
+
+const SOURCE_LABELS: Record<ExportTradeSource, string> = {
   apt: '아파트',
-  single: '단독다가구',
   rowhouse: '연립다세대',
   officetel: '오피스텔',
 };
+
+const EXPORT_SOURCES: ExportTradeSource[] = ['apt', 'rowhouse', 'officetel'];
 
 function escapeHtml(value: unknown) {
   return String(value ?? '')
@@ -65,7 +68,7 @@ function groupByMonth(items: BuildingTradeItem[]) {
   return Array.from(groups.entries());
 }
 
-function conditionRows(record: PropertyRecord, source: BuildingTradeSource, items: BuildingTradeItem[]) {
+function conditionRows(record: PropertyRecord, source: ExportTradeSource, items: BuildingTradeItem[]) {
   const first = items[0];
   const complexName = first?.buildingName || record.building || '-';
   return `<table class="conditions">
@@ -138,7 +141,7 @@ function tradeTable(items: BuildingTradeItem[]) {
 }
 
 function sourceSections(record: PropertyRecord, info: BuildingTradeInfo) {
-  return (Object.keys(SOURCE_LABELS) as BuildingTradeSource[])
+  return EXPORT_SOURCES
     .map((source) => {
       const items = info.items.filter((item) => item.source === source);
       if (!items.length) return '';

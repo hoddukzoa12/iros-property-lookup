@@ -5,6 +5,7 @@ import { addressesToPnu } from './ldong/lookup';
 import { fetchLandInfos } from './landinfo';
 import { fetchBuildingTrades } from './trade';
 import { fetchCommercialPrices } from './commercial-price';
+import { fetchRealtyPrices } from './realty-price';
 import { buildEumPrintHtml } from './eum/print';
 import type {
   BuildingTradeRequest,
@@ -12,6 +13,7 @@ import type {
   CommercialPriceRequest,
   EumPrintItem,
   EumPrintRequest,
+  RealtyPriceRequest,
 } from '../shared/types';
 
 export interface Env {
@@ -68,6 +70,21 @@ function normalizeBuildingTradeItems(value: unknown): BuildingTradeRequest['item
 }
 
 function normalizeCommercialPriceItems(value: unknown): CommercialPriceRequest['items'] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((item: any) => ({
+      key: String(item?.key ?? '').trim(),
+      address: String(item?.address ?? '').trim(),
+      roadAddr: item?.roadAddr == null ? undefined : String(item.roadAddr).trim(),
+      building: item?.building == null ? undefined : String(item.building).trim(),
+      floor: item?.floor == null ? undefined : String(item.floor).trim(),
+      room: item?.room == null ? undefined : String(item.room).trim(),
+      type: item?.type == null ? undefined : String(item.type).trim(),
+    }))
+    .filter((item) => item.key && item.address);
+}
+
+function normalizeRealtyPriceItems(value: unknown): RealtyPriceRequest['items'] | null {
   if (!Array.isArray(value)) return null;
   return value
     .map((item: any) => ({
@@ -233,6 +250,29 @@ export default {
         return json({ ok: true, results });
       } catch (e: any) {
         return json({ ok: false, error: e?.message ?? '상가/오피스 기준시가 조회 실패' }, 502);
+      }
+    }
+
+    // 토지/건물/집합건물 → 부동산공시가격 알리미 공동주택가격 + 개별주택가격 조회
+    if (url.pathname === '/api/realty-prices' && request.method === 'POST') {
+      let body: RealtyPriceRequest;
+      try {
+        body = (await request.json()) as RealtyPriceRequest;
+      } catch {
+        return json({ ok: false, error: '잘못된 요청 본문' }, 400);
+      }
+      const items = normalizeRealtyPriceItems(body?.items);
+      if (!items) {
+        return json({ ok: false, error: 'items 배열 필수' }, 400);
+      }
+      if (items.length > 1000) {
+        return json({ ok: false, error: '한 번에 최대 1000개까지 조회할 수 있습니다.' }, 400);
+      }
+      try {
+        const results = await fetchRealtyPrices(items, env, ctx);
+        return json({ ok: true, results });
+      } catch (e: any) {
+        return json({ ok: false, error: e?.message ?? '공시가격 조회 실패' }, 502);
       }
     }
 

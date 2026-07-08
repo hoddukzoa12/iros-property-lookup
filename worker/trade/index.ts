@@ -39,11 +39,6 @@ const SOURCES: TradeSourceDef[] = [
     endpoint: 'https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade',
   },
   {
-    source: 'single',
-    label: '단독다가구',
-    endpoint: 'https://apis.data.go.kr/1613000/RTMSDataSvcSHTrade/getRTMSDataSvcSHTrade',
-  },
-  {
     source: 'rowhouse',
     label: '연립다세대',
     endpoint: 'https://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade',
@@ -126,7 +121,7 @@ function normalizeTrade(source: TradeSourceDef, raw: Record<string, string>): Bu
   return {
     source: source.source,
     sourceLabel: source.label,
-    matchLevel: source.source === 'single' ? 'candidate' : 'lot',
+    matchLevel: 'lot',
     dealDate: dealDate(raw),
     dealAmount,
     dealAmountManwon: amountToNumber(dealAmount),
@@ -242,16 +237,6 @@ function normalizeJibun(value: string) {
   return `${san ? '산' : ''}${Number(match[1])}${match[2] ? `-${Number(match[2])}` : ''}`;
 }
 
-function maskedJibunMatches(masked: string, target: string) {
-  if (!masked.includes('*')) return normalizeJibun(masked) === target;
-  const source = masked.replace(/\s+/g, '').replace(/^산/, '');
-  const targetBody = target.replace(/^산/, '');
-  const targetMain = targetBody.split('-')[0];
-  const pattern = `^${source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '\\d')}$`;
-  const re = new RegExp(pattern);
-  return re.test(targetBody) || re.test(targetMain);
-}
-
 function targetFromPnu(item: BuildingTradeRequestItem, pnu: string): TradeTarget {
   const parsed = parseAddress(item.address);
   const mountain = pnu[10] === '2';
@@ -278,10 +263,6 @@ function matchesDong(trade: BuildingTradeItem, target: TradeTarget) {
 function matchTrade(trade: BuildingTradeItem, target: TradeTarget): BuildingTradeMatchLevel | null {
   if (!matchesDong(trade, target)) return null;
   if (!trade.jibun) return null;
-
-  if (trade.source === 'single') {
-    return maskedJibunMatches(trade.jibun, target.normalizedJibun) ? 'candidate' : null;
-  }
 
   return normalizeJibun(trade.jibun) === target.normalizedJibun ? 'lot' : null;
 }
@@ -405,13 +386,15 @@ export async function fetchBuildingTrades(
   const now = new Date();
 
   const results = targets.map<BuildingTradeInfo>((target) => {
-    const items = (grouped.get(target.lawdCd) ?? [])
+    const matchedItems = (grouped.get(target.lawdCd) ?? [])
       .map((trade) => {
         const matchLevel = matchTrade(trade, target);
         return matchLevel ? { ...trade, matchLevel } : null;
       })
       .filter((trade): trade is BuildingTradeItem => Boolean(trade))
-      .filter((trade) => isWithinLastYear(trade.dealDate, now))
+      .filter((trade) => isWithinLastYear(trade.dealDate, now));
+    const items = matchedItems
+      .filter((item) => item.source !== 'single')
       .sort(sortTrades);
 
     return {

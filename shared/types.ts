@@ -163,6 +163,71 @@ export interface CommercialPriceResponse {
   error?: string;
 }
 
+// ── 공동주택가격 + 개별주택가격 (부동산공시가격 알리미) ─────────────
+export interface RealtyPriceRequestItem {
+  key: string;        // 매칭용 (부동산고유번호 pin)
+  address: string;    // 지번 주소
+  roadAddr?: string;  // 도로명 주소
+  building?: string;  // 등기부 건물명
+  floor?: string;     // 등기부 층
+  room?: string;      // 등기부 호
+  type?: string;      // 토지 / 건물 / 집합건물
+}
+
+export interface ApartmentOfficialPriceItem {
+  baseDate: string;       // YYYY.M.D
+  complexName: string;    // 단지명
+  dongName: string;       // 동명
+  roomName: string;       // 호명
+  exclusiveArea: number | null;
+  price: number | null;
+}
+
+export interface ApartmentOfficialPriceInfo {
+  key: string;
+  address: string;
+  pnu: string | null;
+  detailAddress: string;
+  items: ApartmentOfficialPriceItem[];
+  error?: string;
+}
+
+export interface IndividualHousePriceItem {
+  baseDate: string;           // YYYY/MM/DD
+  address: string;
+  landAreaTotal: number | null;
+  landAreaCalculated: number | null;
+  buildingAreaTotal: number | null;
+  buildingAreaCalculated: number | null;
+  price: number | null;
+}
+
+export interface IndividualHousePriceInfo {
+  key: string;
+  address: string;
+  pnu: string | null;
+  items: IndividualHousePriceItem[];
+  error?: string;
+}
+
+export interface RealtyPriceInfo {
+  key: string;
+  address: string;
+  pnu: string | null;
+  apartment: ApartmentOfficialPriceInfo;
+  individual: IndividualHousePriceInfo;
+}
+
+export interface RealtyPriceRequest {
+  items: RealtyPriceRequestItem[];
+}
+
+export interface RealtyPriceResponse {
+  ok: boolean;
+  results: RealtyPriceInfo[];
+  error?: string;
+}
+
 // ── 토지이용계획 인쇄 HTML (EUM) ──────────────────────────────
 export interface EumPrintItem {
   key: string;
