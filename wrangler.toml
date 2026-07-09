@@ -13,6 +13,18 @@ binding = "LDONG"
 id = "44ac6675379f452d976b9ea9c5ebe24a"
 preview_id = "92a68cc4a68e45a4abef51d80ae47274"
 
-# 정기 갱신: 매월 1일 00:00 UTC → 법정동코드 재수집
+# 건축물대장 PDF 캐시용: D1은 작업/상태 메타, R2는 PDF 원본/병합본 임시 저장.
+[[d1_databases]]
+binding = "BUILDING_REGISTER_DB"
+database_name = "iros-building-register"
+database_id = "055adde7-871a-4af7-86cc-0eaa330fa4df"
+
+[[r2_buckets]]
+binding = "BUILDING_REGISTER_PDFS"
+bucket_name = "iros-building-register-pdfs"
+
+# 정기 작업:
+# - 매월 1일 00:00 UTC → 법정동코드 재수집
+# - 매일 18:00 UTC → 건축물대장 PDF 임시 캐시 cleanup
 [triggers]
-crons = ["0 0 1 * *"]
+crons = ["0 0 1 * *", "0 18 * * *"]

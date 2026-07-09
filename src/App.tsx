@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collect, fetchBuildingTrades, fetchCommercialPrices, fetchEumPrintHtml, fetchLandInfo, fetchRealtyPrices } from './api';
+import {
+  collect,
+  downloadBuildingRegisterPdf,
+  fetchBuildingRegisterStatus,
+  fetchBuildingTrades,
+  fetchCommercialPrices,
+  fetchEumPrintHtml,
+  fetchLandInfo,
+  fetchRealtyPrices,
+} from './api';
 import { downloadBatches } from './lib/excel';
 import { buildLandBundlePdfHtml, buildLandBundlePdfHtmlMany } from './lib/landBundlePdf';
 import {
@@ -9,6 +18,8 @@ import {
   printBuildingBundlePdf,
 } from './lib/buildingBundleExport';
 import type {
+  BuildingRegisterAvailability,
+  BuildingRegisterRequestItem,
   BuildingTradeInfo,
   BuildingTradeRequestItem,
   CommercialPriceInfo,
@@ -42,6 +53,17 @@ function writeWindowMessage(w: Window, title: string, message: string) {
     </style></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`);
   w.document.close();
   w.focus();
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function waitForPrintableAssets(w: Window, timeoutMs = 8000) {
@@ -330,8 +352,11 @@ export default function App() {
   const [commercialPriceLoading, setCommercialPriceLoading] = useState(false);
   const [realtyPriceInfo, setRealtyPriceInfo] = useState<Record<string, RealtyPriceInfo>>({});
   const [realtyPriceLoading, setRealtyPriceLoading] = useState(false);
+  const [buildingRegisterInfo, setBuildingRegisterInfo] = useState<Record<string, BuildingRegisterAvailability>>({});
+  const [buildingRegisterLoading, setBuildingRegisterLoading] = useState(false);
   const [bundleDownloadingKey, setBundleDownloadingKey] = useState<string | null>(null);
   const [bundlePdfPrintingKey, setBundlePdfPrintingKey] = useState<string | null>(null);
+  const [buildingRegisterPdfKey, setBuildingRegisterPdfKey] = useState<string | null>(null);
   const [eumPrintingKey, setEumPrintingKey] = useState<string | null>(null);
   const [buildingMenuOpen, setBuildingMenuOpen] = useState(false);
   const [allExpandedOverride, setAllExpandedOverride] = useState<boolean | null>(null);
@@ -379,6 +404,11 @@ export default function App() {
     [exportRecords],
   );
 
+  const selectedBuildingRegisterRecords = useMemo(
+    () => selectedBuildingRecords.filter((rec) => buildingRegisterInfo[rec.pin]?.status === 'available'),
+    [selectedBuildingRecords, buildingRegisterInfo],
+  );
+
   const done = rows.filter((r) => r.status === 'done' || r.status === 'error').length;
 
   async function onCollect() {
@@ -392,6 +422,7 @@ export default function App() {
     setTradeInfo({});
     setCommercialPriceInfo({});
     setRealtyPriceInfo({});
+    setBuildingRegisterInfo({});
     setRows(addresses.map((a) => ({ address: a, status: 'pending', records: [], selectedPins: [], total: 0 })));
 
     const update = (i: number, patch: Partial<Row>) =>
@@ -441,6 +472,7 @@ export default function App() {
       loadBuildingTrades(buildingRecords),
       loadCommercialPrices(buildingRecords),
       loadRealtyPrices(realtyRecords),
+      loadBuildingRegisters(buildingRecords),
     ]);
   }
 
@@ -552,6 +584,47 @@ export default function App() {
     };
   }
 
+  function toBuildingRegisterItem(rec: PropertyRecord): BuildingRegisterRequestItem {
+    return {
+      key: rec.pin,
+      pinFmt: rec.pinFmt,
+      address: rec.address,
+      roadAddr: rec.roadAddr,
+      building: rec.building,
+      floor: rec.floor,
+      room: rec.room,
+      type: rec.type,
+    };
+  }
+
+  async function loadBuildingRegisters(records: PropertyRecord[]) {
+    const seen = new Set<string>();
+    const items = records
+      .filter(isBuildingRecord)
+      .filter((rec) => {
+        if (seen.has(rec.pin)) return false;
+        seen.add(rec.pin);
+        return true;
+      })
+      .map(toBuildingRegisterItem);
+
+    if (!items.length) return {};
+
+    setBuildingRegisterLoading(true);
+    try {
+      const res = await fetchBuildingRegisterStatus({ items });
+      if (!res.ok) {
+        alert(res.error ?? '건축물대장 조회에 실패했습니다.');
+        return {};
+      }
+      const next = Object.fromEntries(res.results.map((r) => [r.key, r]));
+      setBuildingRegisterInfo((prev) => ({ ...prev, ...next }));
+      return next;
+    } finally {
+      setBuildingRegisterLoading(false);
+    }
+  }
+
   async function loadRealtyPrices(records: PropertyRecord[]) {
     const seen = new Set<string>();
     const items = records
@@ -652,6 +725,13 @@ export default function App() {
     return renderDataStatus(realtyPriceLoading && !info, hasItems, info?.error);
   }
 
+  function renderBuildingRegisterCell(rec: PropertyRecord) {
+    const info = buildingRegisterInfo[rec.pin];
+    if (buildingRegisterLoading && !info) return renderDataStatus(true, false);
+    if (info?.status === 'error') return renderDataStatus(false, false, info.error);
+    return renderDataStatus(false, info?.status === 'available');
+  }
+
   function renderLandJigaCell(rec: PropertyRecord) {
     const info = landInfo[rec.pin];
     return renderDataStatus(landLoading && !info, Boolean(info?.jiga.length), info?.error);
@@ -689,35 +769,49 @@ export default function App() {
     }
 
     const sources = currentBuildingBundleSources();
-    const hasData = hasBuildingBundleData(rec, sources);
+    const hasRegister = buildingRegisterInfo[rec.pin]?.status === 'available';
+    const hasBundleData = hasBuildingBundleData(rec, sources);
+    const registerBusy = buildingRegisterPdfKey === rec.pin;
     const pdfBusy = bundlePdfPrintingKey === rec.pin;
     const excelBusy = bundleDownloadingKey === rec.pin;
-    const disabled = running ||
+    const busy = running ||
       tradeLoading ||
       commercialPriceLoading ||
       realtyPriceLoading ||
+      buildingRegisterLoading ||
+      Boolean(buildingRegisterPdfKey) ||
       Boolean(bundleDownloadingKey) ||
-      Boolean(bundlePdfPrintingKey) ||
-      !hasData;
-    const title = hasData ? '있는 건물 자료만 묶어 저장합니다.' : '내보낼 건물 자료가 없습니다.';
+      Boolean(bundlePdfPrintingKey);
+    const registerTitle = hasRegister ? '세움터 건축물대장 PDF만 저장합니다.' : '건축물대장을 찾지 못했습니다.';
+    const pdfTitle = hasBundleData ? '건물 통합자료 PDF를 별도로 출력합니다.' : '내보낼 건물 통합자료가 없습니다.';
+    const excelTitle = hasBundleData ? '있는 건물 자료만 묶어 저장합니다.' : '내보낼 엑셀 자료가 없습니다.';
 
     return (
       <div className="download-actions">
         <button
           type="button"
           className="row-action download-button"
-          onClick={() => onBuildingBundlePdfOne(rec)}
-          disabled={disabled}
-          title={title}
+          onClick={() => onBuildingRegisterPdfOne(rec)}
+          disabled={busy || !hasRegister}
+          title={registerTitle}
         >
-          {pdfBusy ? '출력 중…' : 'PDF'}
+          {registerBusy ? '생성 중…' : '건축물대장'}
+        </button>
+        <button
+          type="button"
+          className="row-action download-button"
+          onClick={() => onBuildingBundlePdfOne(rec)}
+          disabled={busy || !hasBundleData}
+          title={pdfTitle}
+        >
+          {pdfBusy ? '생성 중…' : 'PDF'}
         </button>
         <button
           type="button"
           className="row-action download-button"
           onClick={() => onBuildingBundleExcelOne(rec)}
-          disabled={disabled}
-          title={title}
+          disabled={busy || !hasBundleData}
+          title={excelTitle}
         >
           {excelBusy ? '생성 중…' : 'EXCEL'}
         </button>
@@ -826,8 +920,33 @@ export default function App() {
     };
   }
 
+  async function ensureBuildingRegisterData(records: PropertyRecord[]) {
+    const missing = records.filter((rec) => isBuildingRecord(rec) && !buildingRegisterInfo[rec.pin]);
+    const loaded = missing.length ? await loadBuildingRegisters(missing) : {};
+    return { ...buildingRegisterInfo, ...loaded };
+  }
+
+  async function onBuildingRegisterPdfOne(rec: PropertyRecord) {
+    if (running || bundleDownloadingKey || bundlePdfPrintingKey || buildingRegisterPdfKey) return;
+
+    setBuildingRegisterPdfKey(rec.pin);
+    try {
+      const info = await ensureBuildingRegisterData([rec]);
+      if (info[rec.pin]?.status !== 'available') {
+        alert('이 건물의 건축물대장을 찾지 못했습니다.');
+        return;
+      }
+      const { blob, filename } = await downloadBuildingRegisterPdf({ items: [toBuildingRegisterItem(rec)] });
+      triggerBlobDownload(blob, filename);
+    } catch (e: any) {
+      alert(e?.message ?? '건축물대장 PDF 생성에 실패했습니다.');
+    } finally {
+      setBuildingRegisterPdfKey(null);
+    }
+  }
+
   async function onBuildingBundleExcelOne(rec: PropertyRecord) {
-    if (running || bundleDownloadingKey || bundlePdfPrintingKey) return;
+    if (running || bundleDownloadingKey || bundlePdfPrintingKey || buildingRegisterPdfKey) return;
 
     setBundleDownloadingKey(rec.pin);
     try {
@@ -840,7 +959,7 @@ export default function App() {
   }
 
   async function onBuildingBundlePdfOne(rec: PropertyRecord) {
-    if (running || bundleDownloadingKey || bundlePdfPrintingKey) return;
+    if (running || bundleDownloadingKey || bundlePdfPrintingKey || buildingRegisterPdfKey) return;
 
     setBundlePdfPrintingKey(rec.pin);
     try {
@@ -853,7 +972,7 @@ export default function App() {
   }
 
   async function onBuildingBundleZipDownload() {
-    if (!selectedBuildingRecords.length || running || bundleDownloadingKey || bundlePdfPrintingKey) return;
+    if (!selectedBuildingRecords.length || running || bundleDownloadingKey || bundlePdfPrintingKey || buildingRegisterPdfKey) return;
 
     setBundleDownloadingKey('bulk');
     try {
@@ -866,7 +985,7 @@ export default function App() {
   }
 
   async function onBuildingBundlePdfDownload() {
-    if (!selectedBuildingRecords.length || running || bundleDownloadingKey || bundlePdfPrintingKey) return;
+    if (!selectedBuildingRecords.length || running || bundleDownloadingKey || bundlePdfPrintingKey || buildingRegisterPdfKey) return;
 
     setBundlePdfPrintingKey('bulk');
     try {
@@ -875,6 +994,28 @@ export default function App() {
       if (!printed) alert('선택된 건물의 내보낼 자료가 없습니다.');
     } finally {
       setBundlePdfPrintingKey(null);
+    }
+  }
+
+  async function onBuildingRegisterPdfDownload() {
+    if (!selectedBuildingRecords.length || running || bundleDownloadingKey || bundlePdfPrintingKey || buildingRegisterPdfKey) return;
+
+    setBuildingRegisterPdfKey('bulk');
+    try {
+      const registerInfo = await ensureBuildingRegisterData(selectedBuildingRecords);
+      const registerRecords = selectedBuildingRecords.filter((rec) => registerInfo[rec.pin]?.status === 'available');
+      if (!registerRecords.length) {
+        alert('선택된 건물의 건축물대장을 찾지 못했습니다.');
+        return;
+      }
+      const { blob, filename } = await downloadBuildingRegisterPdf({
+        items: registerRecords.map(toBuildingRegisterItem),
+      });
+      triggerBlobDownload(blob, filename);
+    } catch (e: any) {
+      alert(e?.message ?? '건축물대장 PDF 생성에 실패했습니다.');
+    } finally {
+      setBuildingRegisterPdfKey(null);
     }
   }
 
@@ -988,7 +1129,7 @@ export default function App() {
                   setBuildingMenuOpen(false);
                   onBuildingBundleZipDownload();
                 }}
-                disabled={!selectedBuildingRecords.length || running || tradeLoading || commercialPriceLoading || realtyPriceLoading || Boolean(bundleDownloadingKey) || Boolean(bundlePdfPrintingKey)}
+                disabled={!selectedBuildingRecords.length || running || tradeLoading || commercialPriceLoading || realtyPriceLoading || buildingRegisterLoading || Boolean(bundleDownloadingKey) || Boolean(bundlePdfPrintingKey) || Boolean(buildingRegisterPdfKey)}
               >
                 {bundleDownloadingKey === 'bulk' ? '생성 중…' : `EXCEL(ZIP) (${selectedBuildingRecords.length}건)`}
               </button>
@@ -998,9 +1139,19 @@ export default function App() {
                   setBuildingMenuOpen(false);
                   onBuildingBundlePdfDownload();
                 }}
-                disabled={!selectedBuildingRecords.length || running || tradeLoading || commercialPriceLoading || realtyPriceLoading || Boolean(bundleDownloadingKey) || Boolean(bundlePdfPrintingKey)}
+                disabled={!selectedBuildingRecords.length || running || tradeLoading || commercialPriceLoading || realtyPriceLoading || buildingRegisterLoading || Boolean(bundleDownloadingKey) || Boolean(bundlePdfPrintingKey) || Boolean(buildingRegisterPdfKey)}
               >
-                {bundlePdfPrintingKey === 'bulk' ? 'PDF 생성 중…' : `PDF (${selectedBuildingRecords.length}건)`}
+                {bundlePdfPrintingKey === 'bulk' ? 'PDF 생성 중…' : `통합자료 PDF (${selectedBuildingRecords.length}건)`}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBuildingMenuOpen(false);
+                  onBuildingRegisterPdfDownload();
+                }}
+                disabled={!selectedBuildingRegisterRecords.length || running || buildingRegisterLoading || Boolean(bundleDownloadingKey) || Boolean(bundlePdfPrintingKey) || Boolean(buildingRegisterPdfKey)}
+              >
+                {buildingRegisterPdfKey === 'bulk' ? 'PDF 생성 중…' : `건축물대장 PDF (${selectedBuildingRegisterRecords.length}건)`}
               </button>
             </div>
           </details>
@@ -1124,7 +1275,7 @@ export default function App() {
                             <col className="col-check" />
                             <col className="col-property" />
                             <col className="col-type" />
-                            <col span={7} className="col-status" />
+                            <col span={8} className="col-status" />
                             <col className="col-download" />
                           </colgroup>
                           <thead>
@@ -1145,6 +1296,7 @@ export default function App() {
                               <th className="status-col">개별주택가격</th>
                               <th className="status-col">상가/오피스 기준시가</th>
                               <th className="status-col">실거래가</th>
+                              <th className="status-col">건축물대장</th>
                               <th className="download-col">다운로드</th>
                             </tr>
                           </thead>
@@ -1189,6 +1341,7 @@ export default function App() {
                                           <td className="realty-price-cell">{renderIndividualPriceCell(rec)}</td>
                                           <td className="commercial-price-cell">{renderCommercialPriceCell(rec)}</td>
                                           <td className="trade-cell">{renderTradeCell(rec)}</td>
+                                          <td className="building-register-cell">{renderBuildingRegisterCell(rec)}</td>
                                           <td className="download-col">{renderDownloadCell(rec)}</td>
                                         </>
                                       );
@@ -1203,6 +1356,7 @@ export default function App() {
                                         <td className="realty-price-cell">-</td>
                                         <td className="commercial-price-cell">-</td>
                                         <td className="trade-cell">-</td>
+                                        <td className="building-register-cell">-</td>
                                         <td className="download-col">{renderDownloadCell(rec)}</td>
                                       </>
                                     );
@@ -1215,6 +1369,7 @@ export default function App() {
                                         <td className="realty-price-cell">-</td>
                                         <td className="commercial-price-cell">-</td>
                                         <td className="trade-cell">-</td>
+                                        <td className="building-register-cell">-</td>
                                         <td className="download-col">{renderDownloadCell(rec)}</td>
                                       </>
                                     );
