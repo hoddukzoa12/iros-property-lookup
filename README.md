@@ -1,6 +1,6 @@
 # IROS 부동산고유번호 조회 서비스
 
-주소를 대량으로 입력하면 **부동산고유번호(14자리)**를 일괄 조회하고, 인터넷등기소 **일괄열람 등록양식(.xls)**을 자동 생성하는 웹 서비스. 토지는 **개별공시지가·토지등급**까지 조회해 한 PDF로 묶어준다.
+주소를 대량으로 입력하면 **부동산고유번호(14자리)**를 일괄 조회하고, 인터넷등기소 **일괄열람 등록양식(.xls)**을 자동 생성하는 웹 서비스. 토지와 건물 관련 가격·이용계획 자료도 함께 조회해 PDF/XLSX로 묶어준다.
 
 세무·법무 실무에서 주소를 하나씩 검색하던 반복 작업을 없애는 것이 목표다. 조회·양식 생성까지 자동화하며, 인터넷등기소 로그인·결제·열람·저장은 사용자가 직접 수행한다.
 
@@ -17,9 +17,10 @@
 - 행별 선택 체크박스, 전체선택/정확·관련선택/해제
 
 ### 내보내기
-- **엑셀 다운로드** — 선택 고유번호를 일괄열람 등록양식 `.xls`(BIFF8)로. 30건 단위 분할, 여러 개면 zip
-- **토지 다운로드** — 선택한 토지의 **개별공시지가 + 토지등급**을 하나의 PDF로 병합 (필지마다 공시지가 페이지 → 토지등급 페이지)
-- **상가/오피스 기준시가** — 건물·집합건물의 상업용 건물/오피스텔 기준시가를 Hometax 실시간 조회로 가져오고, 행별 XLSX/PDF로 저장
+- **고유번호 엑셀** — 선택 고유번호를 일괄열람 등록양식 `.xls`(BIFF8)로. 30건 단위 분할, 여러 개면 zip
+- **토지 다운로드** — 선택한 토지의 **토지이용계획서 → 개별공시지가 → 토지등급** 순서로 PDF 병합
+- **건물 다운로드** — 건물·집합건물의 가격·거래 자료를 통합 XLSX/PDF로 생성. 일괄 XLSX는 물건별 파일을 zip으로 묶음
+- **가격 자료 조회** — 공동주택가격, 개별주택가격, 상가/오피스 기준시가, 실거래가를 가능한 자료만 표시하고 내보내기
 
 ---
 
@@ -31,7 +32,10 @@
 | 법정동코드 (주소→PNU) | data.go.kr / odcloud (15123287) | 배치 수집 → KV 캐시 |
 | 개별공시지가 | 국토부(온나라) | LH 씨:리얼 프록시 |
 | 토지등급 | 국토부(NSDI) | LH 씨:리얼 프록시 |
+| 토지이용계획 | 토지이음(eum.go.kr) | 인쇄용 HTML 조회 |
+| 공동주택가격·개별주택가격 | 부동산공시가격알리미(realtyprice.kr) | 주소·동호 기반 조회 |
 | 상가/오피스텔 기준시가 | 국세청 Hometax | 주소→PNU 후 건물·층·호 기준 실시간 조회 |
+| 실거래가 | data.go.kr 국토교통부 실거래가 API | 최근 1년 매매 조회 |
 
 > 공시지가·토지등급은 원래 V-World 공식 API로 붙이려 했으나, **Cloudflare Worker → api.vworld.kr 이 520으로 차단**되어(오렌지-투-오렌지) 동일 원천을 제공하는 LH 경로로 전환했다. 제공자는 코드에서 추상화(`worker/landinfo/`)돼 있어, 비-Cloudflare 프록시가 생기면 V-World로 되돌릴 수 있다.
 
@@ -45,7 +49,10 @@ Cloudflare Worker (정적 자산 + /api/*)
         │
         ├─ /api/collect    → iros.go.kr 검색 (고유번호 수집)
         ├─ /api/landinfo   → 주소 → PNU → LH (공시지가·토지등급)
+        ├─ /api/eum-print  → 주소 → PNU → 토지이음 인쇄 HTML
+        ├─ /api/realty-prices → 부동산공시가격알리미 (공동/개별주택가격)
         ├─ /api/commercial-prices → 주소 → PNU → Hometax (상가/오피스 기준시가)
+        ├─ /api/trades     → data.go.kr 실거래가
         └─ /api/pnu        → 주소 → PNU
                               │
                      [법정동코드 캐시] Cloudflare KV
@@ -71,7 +78,10 @@ Cloudflare Worker (정적 자산 + /api/*)
 |---|---|
 | `POST /api/collect` | `{address}` → 부동산고유번호 목록 |
 | `POST /api/landinfo` | `{items:[{key,address}]}` → 토지별 공시지가·토지등급 |
-| `POST /api/commercial-prices` | `{items:[{key,address,building,floor,room}]}` → 상가/오피스 기준시가 |
+| `POST /api/eum-print` | `{items:[{key,address,label}]}` → 토지이용계획 인쇄 HTML |
+| `POST /api/realty-prices` | `{items:[{key,address,roadAddr,building,floor,room,type}]}` → 공동/개별주택가격 |
+| `POST /api/commercial-prices` | `{items:[{key,address,roadAddr,building,floor,room,type}]}` → 상가/오피스 기준시가 |
+| `POST /api/trades` | `{items:[{key,address,roadAddr,building,floor,room,type}]}` → 최근 1년 실거래가 |
 | `POST /api/pnu` | `{addresses:[]}` → PNU 목록 |
 | `GET /api/ldong/status` | 법정동코드 캐시 상태(건수·빌드시각) |
 | `POST /api/admin/refresh-ldong` | 캐시 강제 갱신 (`ADMIN_TOKEN` 보호) |
@@ -108,7 +118,7 @@ npx wrangler secret put VWORLD_API_KEY
 ## 알려진 이슈 / 한계
 
 - **매칭 분류**: 재개발·지번합병으로 지번이 바뀐 필지가 '주의'로 과분류됨 ([#1](../../issues/1))
-- **토지 다운로드**: 원클릭 파일 다운로드가 아닌 브라우저 인쇄(→PDF 저장) 방식 ([#2](../../issues/2))
+- **PDF 다운로드**: 일부 PDF는 브라우저 인쇄(→PDF 저장) 방식 ([#2](../../issues/2))
 - **LH 의존**: 공시지가·토지등급은 공식 API가 아닌 LH 사이트 프록시라 사이트 개편 시 영향받을 수 있음
 - **기준시가 매칭**: 동일 필지에 여러 건물이 있을 수 있어, PNU만으로 붙이지 않고 등기부의 건물명·층·호와 Hometax의 건물·층·호가 맞는 경우만 표시한다.
 
@@ -116,4 +126,4 @@ npx wrangler secret put VWORLD_API_KEY
 
 ## 라이선스
 
-내부 업무용.
+GNU General Public License v3.0 or later. 자세한 내용은 [LICENSE](./LICENSE)를 참고한다.

@@ -2,6 +2,7 @@
   "name": "iros-property-lookup",
   "private": true,
   "version": "0.0.1",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n vite,worker -c cyan,magenta \"vite\" \"wrangler dev --port 8787\"",

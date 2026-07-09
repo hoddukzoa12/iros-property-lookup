@@ -67,7 +67,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .trade-cell,
 .commercial-price-cell,
 .realty-price-cell {
-  width: 86px; min-width: 86px; max-width: 96px;
+  width: var(--status-col-w, 86px); min-width: var(--status-col-w, 86px); max-width: 96px;
   text-align: center !important; vertical-align: middle !important; white-space: normal;
 }
 .row-action {
@@ -87,7 +87,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 .data-status.error { color: var(--red); text-transform: uppercase; }
 .download-col {
   position: sticky; right: 0; z-index: 2;
-  width: 86px; min-width: 86px; text-align: center !important;
+  width: var(--download-col-w, 86px); min-width: var(--download-col-w, 86px); text-align: center !important;
   background: #fff; box-shadow: -1px 0 0 var(--line);
 }
 th.download-col { z-index: 3; background: #f8fafc; }
@@ -206,31 +206,81 @@ th.download-col { z-index: 3; background: #f8fafc; }
   overflow-x: auto; background: #fff;
 }
 .records-table {
-  width: 100%; min-width: 1420px; border-collapse: collapse; font-size: 13px;
+  --check-col-w: 44px;
+  --property-col-w: 430px;
+  --type-col-w: 78px;
+  --status-col-w: 86px;
+  --download-col-w: 86px;
+  --records-table-w: 1240px;
+  width: var(--records-table-w); min-width: var(--records-table-w);
+  table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px;
 }
+.records-table .col-check { width: var(--check-col-w); }
+.records-table .col-property { width: var(--property-col-w); }
+.records-table .col-type { width: var(--type-col-w); }
+.records-table .col-status { width: var(--status-col-w); }
+.records-table .col-download { width: var(--download-col-w); }
 .records-table th,
 .records-table td {
   padding: 10px 12px; border-bottom: 1px solid #edf0f5; vertical-align: top; text-align: left;
 }
 .records-table th {
   background: #f8fafc; color: #475569; font-size: 12px; font-weight: 800; white-space: nowrap;
-  vertical-align: middle;
+  vertical-align: middle; text-align: center;
 }
 .records-table th.status-col { white-space: normal; line-height: 1.25; }
 .records-table tbody tr:last-child td { border-bottom: none; }
 .records-table input[type='checkbox'] {
   width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer;
 }
-.check-col { width: 58px; text-align: center !important; }
-.pin {
-  color: #111827; font-family: 'SF Mono', Menlo, monospace; font-weight: 700; white-space: nowrap;
+.check-col {
+  position: sticky; left: 0; z-index: 4;
+  width: var(--check-col-w); min-width: var(--check-col-w); max-width: var(--check-col-w);
+  text-align: center !important; vertical-align: middle !important;
+  padding-left: 6px !important; padding-right: 6px !important;
+  background: #fff;
 }
-.addr-cell { min-width: 320px; line-height: 1.45; }
+th.check-col { z-index: 6; background: #f8fafc; }
+.selected-row .check-col { background: #fbfdff; }
+.property-col {
+  position: sticky; left: var(--check-col-w); z-index: 3;
+  width: var(--property-col-w); min-width: var(--property-col-w); max-width: var(--property-col-w);
+  background: #fff; box-shadow: 1px 0 0 var(--line);
+}
+th.property-col { z-index: 5; background: #f8fafc; }
+.selected-row .property-col { background: #fbfdff; }
+.property-cell { line-height: 1.45; text-align: left !important; }
+.property-address { color: #111827; font-weight: 700; }
+.property-pin {
+  margin-top: 4px; color: #64748b; font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px; font-weight: 800; white-space: nowrap;
+}
+.column-hint {
+  display: block; margin-top: 2px; color: #64748b; font-size: 11px; font-weight: 700;
+}
+.type-col {
+  position: sticky; left: calc(var(--check-col-w) + var(--property-col-w)); z-index: 3;
+  width: var(--type-col-w); min-width: var(--type-col-w); max-width: var(--type-col-w);
+  text-align: center !important; vertical-align: middle !important;
+  padding-left: 6px !important; padding-right: 6px !important;
+  background: #fff; box-shadow: 1px 0 0 var(--line);
+}
+th.type-col { z-index: 5; background: #f8fafc; }
+.selected-row .type-col { background: #fbfdff; }
+.type-stack {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+}
+.type-value {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 22px; padding: 0 6px; border-radius: 999px;
+  background: #eef2ff; color: #3949ab; font-size: 11px; font-weight: 900; white-space: nowrap;
+}
 .record-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
 .selected-row { background: #fbfdff; }
 .match {
-  display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px;
-  font-size: 12px; font-weight: 800; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 20px; padding: 0 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; white-space: nowrap;
 }
 .match.exact { background: #e6f5ec; color: var(--green); }
 .match.related { background: #eaf0ff; color: var(--accent); }
@@ -245,5 +295,5 @@ th.download-col { z-index: 3; background: #f8fafc; }
   .card-head { align-items: flex-start; }
   .head-side { padding-top: 1px; }
   .dl, .form .go { width: 100%; }
-  .records-table { min-width: 1420px; }
+  .records-table { width: var(--records-table-w); min-width: var(--records-table-w); }
 }

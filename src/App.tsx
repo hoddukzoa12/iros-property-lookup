@@ -1120,13 +1120,24 @@ export default function App() {
 
                       <div className="table-wrap">
                         <table className="records-table">
+                          <colgroup>
+                            <col className="col-check" />
+                            <col className="col-property" />
+                            <col className="col-type" />
+                            <col span={7} className="col-status" />
+                            <col className="col-download" />
+                          </colgroup>
                           <thead>
                             <tr>
                               <th className="check-col">선택</th>
-                              <th>매칭</th>
-                              <th>고유번호</th>
-                              <th>유형</th>
-                              <th>부동산표시</th>
+                              <th className="property-col">
+                                부동산표시
+                                <span className="column-hint">(고유번호)</span>
+                              </th>
+                              <th className="type-col">
+                                유형
+                                <span className="column-hint">(매칭)</span>
+                              </th>
                               <th className="status-col">공시지가</th>
                               <th className="status-col">토지등급</th>
                               <th className="status-col">토지이용계획</th>
@@ -1150,11 +1161,8 @@ export default function App() {
                                       aria-label={`${rec.pinFmt} 선택`}
                                     />
                                   </td>
-                                  <td><span className={`match ${kind}`}>{MATCH_LABELS[kind]}</span></td>
-                                  <td className="pin">{rec.pinFmt}</td>
-                                  <td>{rec.type}</td>
-                                  <td className="addr-cell">
-                                    <div>{rec.address}</div>
+                                  <td className="property-col property-cell">
+                                    <div className="property-address">{rec.address}</div>
                                     {(rec.roadAddr || rec.floor || rec.room) && (
                                       <div className="record-meta">
                                         {[rec.roadAddr, rec.floor && `${rec.floor}층`, rec.room && `${rec.room}호`]
@@ -1162,6 +1170,13 @@ export default function App() {
                                           .join(' · ')}
                                       </div>
                                     )}
+                                    <div className="property-pin">({rec.pinFmt})</div>
+                                  </td>
+                                  <td className="type-col">
+                                    <div className="type-stack">
+                                      <span className="type-value">{rec.type}</span>
+                                      <span className={`match ${kind}`}>{MATCH_LABELS[kind]}</span>
+                                    </div>
                                   </td>
                                   {(() => {
                                     if (rec.type !== '토지') {
