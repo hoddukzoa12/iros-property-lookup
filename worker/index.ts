@@ -353,11 +353,13 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  // ① 정기 갱신 — 법정동은 매월 1일, 건축물대장 임시 파일은 매일 cleanup
+  // ① 정기 갱신 — 법정동은 매일 04:00 KST, 건축물대장 임시 파일은 매일 03:00 KST cleanup
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (event.cron === '0 0 1 * *') {
+    if (event.cron === '0 19 * * *') {
       ctx.waitUntil(refreshLdong(env).catch((e) => console.error('cron refresh 실패:', e?.message)));
     }
-    ctx.waitUntil(cleanupBuildingRegisterArtifacts(env).catch((e) => console.error('건축물대장 cleanup 실패:', e?.message)));
+    if (event.cron === '0 18 * * *') {
+      ctx.waitUntil(cleanupBuildingRegisterArtifacts(env).catch((e) => console.error('건축물대장 cleanup 실패:', e?.message)));
+    }
   },
 };

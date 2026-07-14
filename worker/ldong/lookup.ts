@@ -1,7 +1,7 @@
 // 법정동코드 로더 + 주소→PNU 변환
 // 갱신 조건:
 //  ② 부트스트랩: KV 비어있으면 최초 1회 블로킹 빌드
-//  ③ TTL 안전장치: builtAt 40일 초과면 ctx.waitUntil로 백그라운드 재빌드(응답 안 막음)
+//  ③ TTL 안전장치: builtAt 3일 초과면 ctx.waitUntil로 백그라운드 재빌드(응답 안 막음)
 //  (① 정기 Cron, ④ 수동 강제는 worker/index.ts)
 import { KV_MAP, KV_META, refreshLdong, type LdongMeta } from './refresh';
 
@@ -10,12 +10,12 @@ export interface LdongEnv {
   ODCLOUD_API_KEY: string;
 }
 
-const TTL_MS = 40 * 24 * 60 * 60 * 1000; // 40일
+const TTL_MS = 3 * 24 * 60 * 60 * 1000; // 일일 Cron 연속 실패에 대비한 안전장치
 
 // 아이솔레이트 수명 동안 메모리 캐시 (KV 재조회 방지)
 let MEM: { map: Record<string, string>; builtAt: number } | null = null;
 
-/** KV(→필요 시 odcloud)에서 맵 확보. 조건부 갱신 포함. */
+/** KV(→필요 시 행정안전부 API)에서 맵 확보. 조건부 갱신 포함. */
 async function getMap(env: LdongEnv, ctx?: ExecutionContext): Promise<Record<string, string>> {
   if (MEM) {
     // TTL 초과 시 백그라운드 재빌드 (응답은 기존 맵으로 즉시)
@@ -32,7 +32,7 @@ async function getMap(env: LdongEnv, ctx?: ExecutionContext): Promise<Record<str
 
   if (!mapStr) {
     // ② 부트스트랩: KV 비어있음(최초/전파지연) → 백그라운드 갱신만.
-    //    요청 경로에서 odcloud를 동기 호출하지 않음(520/지연으로 요청 실패 방지).
+    //    요청 경로에서 외부 API를 동기 호출하지 않음(520/지연으로 요청 실패 방지).
     if (ctx) ctx.waitUntil(refreshLdong(env).then(() => { MEM = null; }).catch(() => {}));
     return {};
   }

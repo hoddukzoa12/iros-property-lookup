@@ -18,6 +18,9 @@ const ACTION_ID = 'BCIAAA04L01';
 const DOCUMENT_TTL_MS = 24 * 60 * 60 * 1000;
 const DOWNLOAD_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_ITEMS_PER_DOWNLOAD = 50;
+const EAIS_GET_RETRY_DELAYS_MS = [1_500];
+const EAIS_GET_RETRY_STATUSES = new Set([502, 503, 504, 520, 522, 524]);
+const STATUS_LOOKUP_CONCURRENCY = 5;
 
 export interface BuildingRegisterEnv {
   LDONG: KVNamespace;
@@ -55,6 +58,20 @@ interface ReadyDocument {
   r2Key: string;
   pageCount: number;
   byteSize: number;
+}
+
+interface AvailabilityLookupCache {
+  mainRows: Map<string, Promise<Record<string, any>[]>>;
+  exclusiveRows: Map<string, Promise<Record<string, any>[]>>;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function createAvailabilityLookupCache(): AvailabilityLookupCache {
+  return {
+    mainRows: new Map(),
+    exclusiveRows: new Map(),
+  };
 }
 
 
@@ -104,9 +121,36 @@ class EaisClient {
   }
 
   async getText(path: string, headers: HeadersInit = {}) {
-    const response = await this.request(path, { headers });
-    if (!response.ok) throw new Error(`${path} HTTP ${response.status}`);
-    return response.text();
+    const maxAttempts = EAIS_GET_RETRY_DELAYS_MS.length + 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let response: Response | null = null;
+      let failure: unknown;
+
+      try {
+        response = await this.request(path, { headers });
+      } catch (error) {
+        failure = error;
+      }
+
+      if (response?.ok) return response.text();
+
+      const retryable = response
+        ? EAIS_GET_RETRY_STATUSES.has(response.status)
+        : true;
+      if (!retryable || attempt === maxAttempts) {
+        if (response) throw new Error(`${path} HTTP ${response.status}`);
+        const reason = failure instanceof Error ? failure.message : '알 수 없는 오류';
+        throw new Error(`${path} 연결 실패: ${reason}`);
+      }
+
+      if (response?.body) await response.body.cancel().catch(() => {});
+      const reason = response ? `HTTP ${response.status}` : failure instanceof Error ? failure.message : '연결 실패';
+      const delay = EAIS_GET_RETRY_DELAYS_MS[attempt - 1] + Math.floor(Math.random() * 250);
+      console.warn(`[EAIS] GET 재시도 ${attempt + 1}/${maxAttempts}: ${path} (${reason}, ${delay}ms 후)`);
+      await sleep(delay);
+    }
+
+    throw new Error(`${path} 연결 실패`);
   }
 
   async getJson<T = any>(path: string, headers: HeadersInit = {}) {
@@ -223,7 +267,46 @@ function stripInternal(result: InternalAvailability): BuildingRegisterAvailabili
   return publicResult;
 }
 
-async function selectExclusiveCandidate(client: EaisClient, item: BuildingRegisterRequestItem, parsed: ParsedPnu, mainRows: Record<string, any>[]) {
+async function getMainRows(
+  client: EaisClient,
+  parsed: ParsedPnu,
+  pnu: string,
+  cache: AvailabilityLookupCache,
+) {
+  let pending = cache.mainRows.get(pnu);
+  if (!pending) {
+    pending = client
+      .postJson('/bci/BCIAAA02R01', buildEaisLotSearchPayload(parsed))
+      .then((data) => (Array.isArray(data?.jibunAddr) ? data.jibunAddr : []));
+    cache.mainRows.set(pnu, pending);
+  }
+  return pending;
+}
+
+async function getExclusiveRows(
+  client: EaisClient,
+  sigunguCd: string,
+  titleBldrgstSeqno: string,
+  cache: AvailabilityLookupCache,
+) {
+  const key = `${sigunguCd}:${titleBldrgstSeqno}`;
+  let pending = cache.exclusiveRows.get(key);
+  if (!pending) {
+    pending = client
+      .postJson('/bci/BCIAAA02R04', buildEaisExclusiveListPayload(sigunguCd, titleBldrgstSeqno))
+      .then((data) => (Array.isArray(data?.findExposList) ? data.findExposList : []));
+    cache.exclusiveRows.set(key, pending);
+  }
+  return pending;
+}
+
+async function selectExclusiveCandidate(
+  client: EaisClient,
+  item: BuildingRegisterRequestItem,
+  parsed: ParsedPnu,
+  mainRows: Record<string, any>[],
+  cache: AvailabilityLookupCache,
+) {
   const wantedDong = extractDongNo(item);
   const wantedHo = extractHoNo(item);
   const direct = mainRows.find((row) => {
@@ -244,8 +327,7 @@ async function selectExclusiveCandidate(client: EaisClient, item: BuildingRegist
   });
 
   for (const title of sortedTitleRows) {
-    const data = await client.postJson('/bci/BCIAAA02R04', buildEaisExclusiveListPayload(parsed.sigunguCd, String(title.bldrgstSeqno || '')));
-    const rows = data.findExposList || [];
+    const rows = await getExclusiveRows(client, parsed.sigunguCd, String(title.bldrgstSeqno || ''), cache);
     const match = rows.find((row: Record<string, any>) => {
       const rowDong = normalizeNo(row.dongNm || row.locDongNm || title.dongNm || '');
       const rowHo = normalizeNo(row.hoNm || row.locHoNm || '');
@@ -261,6 +343,7 @@ async function resolveOneAvailability(
   env: BuildingRegisterEnv,
   ctx: ExecutionContext | undefined,
   client: EaisClient,
+  cache: AvailabilityLookupCache,
 ): Promise<InternalAvailability> {
   const pnu = await addressToPnu(item.address, env, ctx);
   if (!pnu) return { key: item.key, address: item.address, pnu: null, status: 'error', item, error: 'PNU 변환 실패' };
@@ -268,13 +351,12 @@ async function resolveOneAvailability(
   if (!parsed) return { key: item.key, address: item.address, pnu, status: 'error', item, error: 'PNU 형식 오류' };
 
   try {
-    const data = await client.postJson('/bci/BCIAAA02R01', buildEaisLotSearchPayload(parsed));
-    const rows: Record<string, any>[] = data.jibunAddr || [];
+    const rows = await getMainRows(client, parsed, pnu, cache);
     if (!rows.length) return { key: item.key, address: item.address, pnu, status: 'none', item };
 
     let candidate: Record<string, any> | null = null;
     if (item.type === '집합건물' || extractHoNo(item)) {
-      candidate = await selectExclusiveCandidate(client, item, parsed, rows);
+      candidate = await selectExclusiveCandidate(client, item, parsed, rows, cache);
     }
     if (!candidate) {
       candidate = rows.find((row) => String(row.regstrKindCd ?? '') === '2') || null;
@@ -312,11 +394,17 @@ export async function fetchBuildingRegisterStatuses(
   if (!items.length) return [];
   const client = new EaisClient(env);
   await client.login();
-  const results: BuildingRegisterAvailability[] = [];
-  for (const item of items) {
-    const result = await resolveOneAvailability(item, env, ctx, client);
-    results.push(stripInternal(result));
-  }
+  const cache = createAvailabilityLookupCache();
+  const results = new Array<BuildingRegisterAvailability>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      const result = await resolveOneAvailability(items[index], env, ctx, client, cache);
+      results[index] = stripInternal(result);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(STATUS_LOOKUP_CONCURRENCY, items.length) }, worker));
   return results;
 }
 
@@ -853,8 +941,9 @@ export async function downloadBuildingRegisterPdf(
 
   try {
     const availability: InternalAvailability[] = [];
+    const cache = createAvailabilityLookupCache();
     for (const item of items) {
-      availability.push(await resolveOneAvailability(item, env, ctx, client));
+      availability.push(await resolveOneAvailability(item, env, ctx, client, cache));
     }
     const available = availability.filter((result) => result.status === 'available' && result.documentType && result.candidate);
     if (!available.length) throw new Error('다운로드 가능한 건축물대장이 없습니다.');

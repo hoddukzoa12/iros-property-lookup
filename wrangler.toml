@@ -7,7 +7,7 @@ directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# 법정동코드 캐시 (주소 → PNU 변환용). odcloud에서 갱신 → KV 저장.
+# 법정동코드 캐시 (주소 → PNU 변환용). 행정안전부 실시간 API에서 갱신 → KV 저장.
 [[kv_namespaces]]
 binding = "LDONG"
 id = "44ac6675379f452d976b9ea9c5ebe24a"
@@ -24,7 +24,7 @@ binding = "BUILDING_REGISTER_PDFS"
 bucket_name = "iros-building-register-pdfs"
 
 # 정기 작업:
-# - 매월 1일 00:00 UTC → 법정동코드 재수집
+# - 매일 19:00 UTC(다음 날 04:00 KST) → 법정동코드 재수집
 # - 매일 18:00 UTC → 건축물대장 PDF 임시 캐시 cleanup
 [triggers]
-crons = ["0 0 1 * *", "0 18 * * *"]
+crons = ["0 19 * * *", "0 18 * * *"]

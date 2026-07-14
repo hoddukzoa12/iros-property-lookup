@@ -613,11 +613,30 @@ export default function App() {
     setBuildingRegisterLoading(true);
     try {
       const res = await fetchBuildingRegisterStatus({ items });
-      if (!res.ok) {
-        alert(res.error ?? '건축물대장 조회에 실패했습니다.');
-        return {};
+      let next: Record<string, BuildingRegisterAvailability>;
+      if (res.ok) {
+        next = Object.fromEntries(res.results.map((result) => [result.key, result]));
+      } else {
+        const error = res.error ?? '건축물대장 조회에 실패했습니다.';
+        next = Object.fromEntries(items.map((item) => [item.key, {
+          key: item.key,
+          address: item.address,
+          pnu: null,
+          status: 'error',
+          error,
+        } satisfies BuildingRegisterAvailability]));
       }
-      const next = Object.fromEntries(res.results.map((r) => [r.key, r]));
+      setBuildingRegisterInfo((prev) => ({ ...prev, ...next }));
+      return next;
+    } catch (error: any) {
+      const message = error?.message ?? '건축물대장 조회에 실패했습니다.';
+      const next = Object.fromEntries(items.map((item) => [item.key, {
+        key: item.key,
+        address: item.address,
+        pnu: null,
+        status: 'error',
+        error: message,
+      } satisfies BuildingRegisterAvailability]));
       setBuildingRegisterInfo((prev) => ({ ...prev, ...next }));
       return next;
     } finally {
